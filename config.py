@@ -6,4 +6,4 @@ DATABASE_DIR = PROJECT_ROOT / "database"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 ASSET_DIR = PROJECT_ROOT / "assets"
 
-LITERATURE_DB_PATH = DATABASE_DIR / "literature_db.xlsx"
+LITERATURE_DB_PATH = PROJECT_ROOT / "literature_db.xlsx"
