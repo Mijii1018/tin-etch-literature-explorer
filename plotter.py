@@ -55,6 +55,20 @@ def draw_profile(
         remaining_fraction = float(np.clip(1.0 - pr_loss_nm / 80.0, 0.0, 1.0))
 
     # -------------------------------------------------------------
+    # 固定 viewport 背景格線。
+    # 這些格線只是視覺參考，不代表實際 nm / µm 座標；因此固定在 0~1 畫布。
+    # 用非常淡的灰線補足技術圖感，同時避免搶過截面與標註。
+    # -------------------------------------------------------------
+    minor_grid = "#F1F3F5"
+    major_grid = "#E5E7EB"
+    for v in np.arange(0.1, 1.0, 0.1):
+        is_major = abs((v * 10) % 2) < 1e-9
+        color = major_grid if is_major else minor_grid
+        lw = 0.75 if is_major else 0.45
+        ax.plot([v, v], [0.08, 0.93], color=color, linewidth=lw, zorder=0)
+        ax.plot([0.05, 0.95], [v, v], color=color, linewidth=lw, zorder=0)
+
+    # -------------------------------------------------------------
     # 固定幾何區：每一篇文獻都畫在同一塊區域。
     # top width 固定視覺寬度；bottom width 只用比例表達 taper。
     # 這樣切換文獻時卡片大小、標註位置完全不會跑。
@@ -175,7 +189,7 @@ def draw_profile(
     # 明確告知不是等比例圖，避免教授把視覺角度當量測值。
     fig.text(
         0.06, 0.035,
-        "Schematic only · not to scale · dimensions and angle are shown as labels",
+        "Schematic only · grid is visual reference only · not to scale",
         color="#9AA3AF", fontsize=7.2, fontstyle="italic", ha="left", va="bottom",
     )
 
