@@ -1,8 +1,8 @@
 """繪製 TiN 蝕刻側壁 profile 示意圖。
 
-這個檔案只負責畫圖，不碰 Streamlit session state。
-圖框尺寸、標註位置與留白固定；不同 recipe 只改變截面幾何和數值，
-避免切換文獻時出現標題、深度標籤或圖框跳動。
+這張圖的用途是「比較不同條件」，不是精密幾何量測，因此版面固定、
+所有標註位置固定。實際數值以文字顯示；截面輪廓只用來表達 taper 趨勢，
+不再用真實 x/y 比例把圖壓扁或撐開。
 """
 
 import numpy as np
@@ -10,14 +10,6 @@ import matplotlib.pyplot as plt
 
 
 ANGLE_BAND_DISPLAY_THRESHOLD_DEG = 0.5
-
-
-def _cd_bottom_nm_for_angle(cd_top_nm, depth_nm, angle_deg):
-    if depth_nm <= 0:
-        return cd_top_nm
-    theta = np.radians(angle_deg)
-    lateral_loss_each_side = depth_nm / np.tan(theta)
-    return max(cd_top_nm - 2 * lateral_loss_each_side, 0.0)
 
 
 def draw_profile(
@@ -31,198 +23,160 @@ def draw_profile(
     angle_low=None,
     angle_high=None,
 ):
-    """回傳固定版面的 TiN 側壁截面示意圖。
+    """回傳固定版面的側壁截面示意圖。
 
-    實際尺寸以文字顯示。幾何圖會用同一個 x/y 縮放倍率放進固定視窗，
-    因此角度關係不會因版面縮放而失真。
+    注意：這是非等比例示意圖。線寬、深度與角度的真實值都直接標在圖上；
+    圖形本身只用來顯示「較垂直 / 較傾斜」的相對趨勢。
     """
 
     plt.rcParams["font.family"] = "sans-serif"
     plt.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 
-    # 固定 Figure 尺寸。不要使用 tight_layout，避免每次文字長度不同又重算版面。
-    fig = plt.figure(figsize=(6.4, 4.9), dpi=110, facecolor="#FFFFFF")
-    ax = fig.add_axes([0.08, 0.13, 0.84, 0.78])
+    fig = plt.figure(figsize=(6.2, 4.6), dpi=110, facecolor="#FFFFFF")
+    ax = fig.add_axes([0.06, 0.10, 0.88, 0.84])
     ax.set_facecolor("#FFFFFF")
 
     text_dark = "#1F2328"
     label_grey = "#5B6270"
+    line_soft = "#8A9099"
     profile_blue = "#1565C0"
     band_blue = "#8FA8C7"
-    line_soft = "#8A9099"
     pr_fill = (0.66, 0.68, 0.72, 0.28)
     tin_fill = (0.08, 0.36, 0.74, 0.08)
 
-    cd_top_nm = max(float(cd_top_um) * 1000.0, 1.0)
-    cd_bottom_nm = max(float(cd_bottom_um) * 1000.0, 0.0)
-    depth_nm = max(float(depth_nm), 1.0)
+    top_um = max(float(cd_top_um), 0.001)
+    bottom_um = max(float(cd_bottom_um), 0.0)
+    depth_nm = max(float(depth_nm), 0.0)
 
+    # 光阻剩餘比例只影響灰色遮罩高度，不影響整體版面。
     if remaining_pr_A is not None and pr_thickness is not None and pr_thickness > 0:
         remaining_fraction = float(np.clip(remaining_pr_A / pr_thickness, 0.0, 1.0))
     else:
         remaining_fraction = float(np.clip(1.0 - pr_loss_nm / 80.0, 0.0, 1.0))
-    is_collapsed = remaining_fraction <= 0.0
 
     # -------------------------------------------------------------
-    # 固定 viewport：axes 永遠是 0~1 的正方形資料座標。
-    # profile 只在中央 46% 寬、34% 高的區域中等比例縮放。
+    # 固定幾何區：每一篇文獻都畫在同一塊區域。
+    # top width 固定視覺寬度；bottom width 只用比例表達 taper。
+    # 這樣切換文獻時卡片大小、標註位置完全不會跑。
     # -------------------------------------------------------------
-    max_profile_w = 0.46
-    max_profile_h = 0.34
-    physical_w = max(cd_top_nm, cd_bottom_nm, 1.0)
-    physical_h = max(depth_nm, 1.0)
-    scale = min(max_profile_w / physical_w, max_profile_h / physical_h)
+    cx = 0.50
+    y_surface = 0.60
+    y_bottom = 0.34
+    top_visual_w = 0.30
 
-    top_w = cd_top_nm * scale
-    bottom_w = cd_bottom_nm * scale
-    depth_h = depth_nm * scale
+    ratio = bottom_um / top_um if top_um > 0 else 1.0
+    # 避免極端數據把圖形壓成一條線；這只是示意圖，不是等比例圖。
+    ratio = float(np.clip(ratio, 0.18, 1.00))
+    bottom_visual_w = top_visual_w * ratio
 
-    x_center = 0.49
-    y_surface = 0.58
-    y_bottom = y_surface - depth_h
+    tl = cx - top_visual_w / 2
+    tr = cx + top_visual_w / 2
+    bl = cx - bottom_visual_w / 2
+    br = cx + bottom_visual_w / 2
 
-    top_left = x_center - top_w / 2.0
-    top_right = x_center + top_w / 2.0
-    bot_left = x_center - bottom_w / 2.0
-    bot_right = x_center + bottom_w / 2.0
+    # PR 遮罩寬度、位置固定。
+    pr_h = 0.045 + 0.07 * max(remaining_fraction, 0.0)
+    left_outer = 0.20
+    right_outer = 0.80
 
-    # 光阻在畫面上的延伸量固定，不再使用固定 260 nm 去撐大資料範圍。
-    mask_extension = 0.13
-    max_pr_height = 0.10
-    pr_height = 0.012 if is_collapsed else max(0.025, max_pr_height * max(remaining_fraction, 0.15))
+    # 基板線
+    ax.plot([0.16, 0.84], [y_bottom, y_bottom], color=line_soft, linewidth=0.9, zorder=1)
 
+    # TiN 截面
+    tx = [tl, tr, br, bl, tl]
+    ty = [y_surface, y_surface, y_bottom, y_bottom, y_surface]
+    ax.fill(tx, ty, color=tin_fill, zorder=2)
+    ax.plot(tx, ty, color=profile_blue, linewidth=2.0, zorder=3)
+
+    # 有不確定範圍時，用外側兩條淡虛線表示，但不改變主要版面。
     has_uncertainty_band = (
         angle_low is not None
         and angle_high is not None
         and (angle_high - angle_low) > ANGLE_BAND_DISPLAY_THRESHOLD_DEG
     )
-    main_ls = (0, (5, 2.5)) if has_uncertainty_band else "solid"
-
-    # 基板基準線
-    ax.plot([0.18, 0.82], [y_bottom, y_bottom], color=line_soft, linewidth=0.8, zorder=1)
-
-    # TiN 截面
-    trench_x = [top_left, top_right, bot_right, bot_left, top_left]
-    trench_y = [y_surface, y_surface, y_bottom, y_bottom, y_surface]
-    ax.fill(trench_x, trench_y, color=tin_fill, zorder=2)
-    ax.plot(
-        trench_x,
-        trench_y,
-        color=profile_blue,
-        linewidth=1.8,
-        linestyle=main_ls,
-        solid_joinstyle="round",
-        zorder=3,
-    )
-
-    # 模型角度不確定帶
     if has_uncertainty_band:
-        for a_deg in (angle_low, angle_high):
-            band_bottom_nm = _cd_bottom_nm_for_angle(cd_top_nm, depth_nm, a_deg)
-            band_w = band_bottom_nm * scale
-            band_left = x_center - band_w / 2.0
-            band_right = x_center + band_w / 2.0
-            ax.plot([top_left, band_left], [y_surface, y_bottom], color=band_blue,
-                    linewidth=1.0, linestyle=(0, (1, 2)), zorder=2.5)
-            ax.plot([top_right, band_right], [y_surface, y_bottom], color=band_blue,
-                    linewidth=1.0, linestyle=(0, (1, 2)), zorder=2.5)
+        spread = min(0.055, 0.012 + (angle_high - angle_low) / 180.0)
+        ax.plot([tl, bl - spread], [y_surface, y_bottom], color=band_blue,
+                linewidth=1.0, linestyle=(0, (1, 2)), zorder=2.5)
+        ax.plot([tr, br + spread], [y_surface, y_bottom], color=band_blue,
+                linewidth=1.0, linestyle=(0, (1, 2)), zorder=2.5)
 
     # 光阻遮罩
-    left_outer = max(0.12, top_left - mask_extension)
-    right_outer = min(0.86, top_right + mask_extension)
-    if is_collapsed:
-        collapse_fill = (0.89, 0.29, 0.24, 0.18)
-        collapse_edge = "#C0392B"
-        for x0, x1 in ((left_outer, top_left), (top_right, right_outer)):
-            ax.fill_between([x0, x1], y_surface, y_surface + pr_height,
-                            color=collapse_fill, zorder=2)
-            ax.plot([x0, x1], [y_surface + pr_height] * 2,
-                    color=collapse_edge, linewidth=0.9, linestyle=(0, (3, 2)), zorder=3)
+    if remaining_fraction <= 0:
+        edge = "#C0392B"
+        fill = (0.89, 0.29, 0.24, 0.16)
+        ph = 0.012
+        for x0, x1 in ((left_outer, tl), (tr, right_outer)):
+            ax.fill_between([x0, x1], y_surface, y_surface + ph, color=fill, zorder=2)
+            ax.plot([x0, x1], [y_surface + ph, y_surface + ph], color=edge,
+                    linewidth=0.9, linestyle=(0, (3, 2)), zorder=3)
     else:
-        for x0, x1 in ((left_outer, top_left), (top_right, right_outer)):
-            ax.fill_between([x0, x1], y_surface, y_surface + pr_height,
-                            color=pr_fill, zorder=2)
-            ax.plot([x0, x1], [y_surface + pr_height] * 2,
-                    color=line_soft, linewidth=0.8, zorder=3)
-            ax.plot([x0, x0], [y_surface, y_surface + pr_height],
-                    color=line_soft, linewidth=0.7, zorder=3)
-            ax.plot([x1, x1], [y_surface, y_surface + pr_height],
-                    color=line_soft, linewidth=0.7, zorder=3)
+        for x0, x1 in ((left_outer, tl), (tr, right_outer)):
+            ax.fill_between([x0, x1], y_surface, y_surface + pr_h, color=pr_fill, zorder=2)
+            ax.plot([x0, x1], [y_surface + pr_h, y_surface + pr_h], color=line_soft, linewidth=0.8)
+            ax.plot([x0, x0], [y_surface, y_surface + pr_h], color=line_soft, linewidth=0.7)
+            ax.plot([x1, x1], [y_surface, y_surface + pr_h], color=line_soft, linewidth=0.7)
 
-    # 表面虛線
-    ax.axhline(y_surface, xmin=0.16, xmax=0.84, linestyle=(0, (1, 4)),
+    ax.axhline(y_surface, xmin=0.15, xmax=0.85, linestyle=(0, (1, 4)),
                linewidth=0.7, color=line_soft, zorder=1)
 
-    # ----------------------
-    # 固定位置的尺寸標註
-    # ----------------------
-    top_dim_y = 0.78
-    ax.plot([top_left, top_right], [top_dim_y, top_dim_y], color=label_grey, linewidth=0.8)
-    ax.scatter([top_left, top_right], [top_dim_y, top_dim_y], s=8, color=label_grey, linewidths=0)
-    ax.text(x_center, 0.835, f"{cd_top_um:.2f} µm", ha="center", va="center",
+    # ---------------------------
+    # 固定位置標註
+    # ---------------------------
+    # Top width
+    ax.plot([0.35, 0.65], [0.82, 0.82], color=label_grey, linewidth=0.8)
+    ax.scatter([0.35, 0.65], [0.82, 0.82], s=8, color=label_grey, linewidths=0)
+    ax.text(0.50, 0.875, f"{top_um:.2f} µm", ha="center", va="center",
             color=text_dark, fontsize=16, fontweight="bold")
-    ax.text(x_center, 0.795, "TOP WIDTH", ha="center", va="center",
+    ax.text(0.50, 0.84, "TOP WIDTH", ha="center", va="center",
             color=label_grey, fontsize=9.5)
 
-    bottom_dim_y = 0.18
-    ax.plot([bot_left, bot_right], [bottom_dim_y, bottom_dim_y], color=label_grey, linewidth=0.8)
-    ax.scatter([bot_left, bot_right], [bottom_dim_y, bottom_dim_y], s=8, color=label_grey, linewidths=0)
-    ax.text(x_center, 0.105, f"{cd_bottom_um:.2f} µm", ha="center", va="center",
+    # Bottom width
+    ax.plot([0.35, 0.65], [0.20, 0.20], color=label_grey, linewidth=0.8)
+    ax.scatter([0.35, 0.65], [0.20, 0.20], s=8, color=label_grey, linewidths=0)
+    ax.text(0.50, 0.125, f"{bottom_um:.2f} µm", ha="center", va="center",
             color=text_dark, fontsize=16, fontweight="bold")
-    ax.text(x_center, 0.145, "BOTTOM WIDTH", ha="center", va="center",
+    ax.text(0.50, 0.165, "BOTTOM WIDTH", ha="center", va="center",
             color=label_grey, fontsize=9.5)
 
-    # 深度不再使用旋轉的大標籤，避免跟圖框撞在一起。
-    ax.text(0.11, 0.50, "ETCH DEPTH", ha="left", va="center",
-            color=label_grey, fontsize=9.5, fontweight="bold")
-    ax.text(0.11, 0.455, f"{depth_nm:.0f} nm", ha="left", va="center",
+    # Etch depth
+    ax.plot([0.15, 0.15], [y_bottom, y_surface], color=label_grey, linewidth=0.8)
+    ax.scatter([0.15, 0.15], [y_bottom, y_surface], s=8, color=label_grey, linewidths=0)
+    ax.text(0.07, 0.50, "ETCH DEPTH", ha="left", va="center",
+            color=label_grey, fontsize=9.3, fontweight="bold")
+    ax.text(0.07, 0.455, f"{depth_nm:.0f} nm", ha="left", va="center",
             color=text_dark, fontsize=13.5, fontweight="bold")
-    ax.plot([0.16, 0.16], [y_bottom, y_surface], color=label_grey, linewidth=0.8)
-    ax.scatter([0.16, 0.16], [y_bottom, y_surface], s=8, color=label_grey, linewidths=0)
 
-    # 角度標註固定在右側。
-    anchor_y = y_surface - depth_h * 0.50
-    text_x = 0.70
+    # Sidewall angle
+    anchor_y = 0.47
     ax.annotate(
-        "",
-        xy=(bot_right, anchor_y),
-        xytext=(text_x - 0.02, anchor_y),
+        "", xy=(br, anchor_y), xytext=(0.70, anchor_y),
         arrowprops=dict(arrowstyle="-", color=label_grey, linewidth=0.8,
                         connectionstyle="arc3,rad=0.10"),
     )
-    ax.text(text_x, anchor_y + 0.045, "SIDEWALL ANGLE", ha="left", va="center",
-            color=label_grey, fontsize=9.5)
-    ax.text(text_x, anchor_y - 0.005, f"{angle_deg:.1f}°", ha="left", va="center",
+    ax.text(0.70, 0.525, "SIDEWALL ANGLE", ha="left", va="center",
+            color=label_grey, fontsize=9.3)
+    ax.text(0.70, 0.472, f"{angle_deg:.1f}°", ha="left", va="center",
             color=text_dark, fontsize=18, fontweight="bold")
     if has_uncertainty_band:
-        ax.text(text_x, anchor_y - 0.055,
-                f"range {angle_low:.1f}°–{angle_high:.1f}°",
+        ax.text(0.70, 0.425, f"range {angle_low:.1f}°–{angle_high:.1f}°",
                 ha="left", va="center", color=label_grey,
-                fontsize=8.2, fontstyle="italic")
+                fontsize=8.1, fontstyle="italic")
 
-    # 角點
-    for cx, cy in ((bot_left, y_bottom), (bot_right, y_bottom), (top_left, y_surface), (top_right, y_surface)):
-        ax.scatter([cx], [cy], s=14, facecolors="none", edgecolors=line_soft,
+    for x, y in ((tl, y_surface), (tr, y_surface), (bl, y_bottom), (br, y_bottom)):
+        ax.scatter([x], [y], s=16, facecolors="none", edgecolors=line_soft,
                    linewidths=1.0, zorder=4)
 
-    # 固定畫布；關掉所有會依資料範圍變化的軸元素。
-    ax.set_xlim(0.0, 1.0)
-    ax.set_ylim(0.0, 1.0)
-    ax.set_aspect("equal", adjustable="box")
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_xlabel("")
-    ax.set_ylabel("")
-    ax.grid(False)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
+    # 完全固定的 viewport
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
 
-    # 不在 Matplotlib 裡重複放標題，外層 Streamlit 已經有「側壁截面示意」。
-    # 這樣可以避免標題在不同瀏覽器縮放比例下被裁切。
-    footnote = "Normalized viewport · dimensions shown as labels · idealized linear sidewall"
-    if has_uncertainty_band:
-        footnote += " · dashed=model estimate"
-    fig.text(0.08, 0.035, footnote, color="#9AA3AF", fontsize=7.2,
-             fontstyle="italic", ha="left", va="bottom")
+    # 明確告知不是等比例圖，避免教授把視覺角度當量測值。
+    fig.text(
+        0.06, 0.035,
+        "Schematic only · not to scale · dimensions and angle are shown as labels",
+        color="#9AA3AF", fontsize=7.2, fontstyle="italic", ha="left", va="bottom",
+    )
 
     return fig
