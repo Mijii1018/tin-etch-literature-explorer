@@ -17,6 +17,7 @@ from predictor import (
     calc_sidewall_angle,
     calc_tin_etch_rate_nm_min,
 )
+from references import reference_for_source, reference_rows, short_source_label
 from utils import nm_min_to_A_s
 from validation import render_validation_section
 
@@ -61,7 +62,8 @@ st.markdown(
       .prototype {border-left:4px solid #9a6841; padding:.8rem 1rem; background:#faf7f2; border-radius:4px;}
       div[data-testid="stMetric"] {border:1px solid #e6e0d8; padding:14px 16px; border-radius:8px; background:white;}
       .architecture {border:1px solid #e6e0d8; padding:14px 16px; border-radius:8px; background:#fff; font-family:monospace; line-height:1.7;}
-
+      .reference-card {border:1px solid #e6e0d8; padding:.75rem .85rem; border-radius:8px; background:#faf7f2; margin:.35rem 0 .8rem 0; line-height:1.45;}
+      .reference-title {font-size:.82rem; color:#4b5563; margin-top:.2rem;}
       .quick-note {padding:.65rem .85rem; border:1px solid #e6e0d8; border-radius:8px; background:#fff;}
       div[data-testid="stMetric"] [data-testid="stMetricValue"] {font-size:1.8rem;}
       @media (max-width: 768px) {
@@ -88,6 +90,10 @@ except (DBValidationError, FileNotFoundError) as exc:
     st.stop()
 
 PRESETS = build_presets_from_db(LITERATURE_DB)
+PRESET_LABELS = list(PRESETS.keys())
+PRESET_META = {PRESET_LABELS[0]: None}
+for label, item in zip(PRESET_LABELS[1:], LITERATURE_DB):
+    PRESET_META[label] = item
 
 DEFAULTS = {
     "BCl3": 0,
@@ -114,6 +120,45 @@ def load_preset(label: str):
         st.session_state[key] = value
 
 
+def preset_display_label(label: str) -> str:
+    item = PRESET_META.get(label)
+    if item is None:
+        return "手動輸入"
+    ref = reference_for_source(item.get("source"))
+    if ref is None:
+        return label
+    case = str(item.get("case", "")).strip()
+    return f"{ref['id']}｜{ref['short']}｜{case}" if case else f"{ref['id']}｜{ref['short']}"
+
+
+def case_display(item) -> str:
+    if item is None:
+        return ""
+    ref = reference_for_source(item.get("source"))
+    case = str(item.get("case", "")).strip()
+    if ref is not None:
+        return f"{ref['id']}｜{ref['short']}｜{case}" if case else f"{ref['id']}｜{ref['short']}"
+    return f"{item.get('source', '')} / {case}"
+
+
+def source_reference_card(item):
+    if item is None:
+        return
+    ref = reference_for_source(item.get("source"))
+    if ref is None:
+        return
+    st.markdown(
+        f"""
+        <div class="reference-card">
+          <strong>{ref['id']}｜{ref['short']}</strong><br>
+          <div class="reference-title">{ref['title']}</div>
+          <div class="reference-title">用途：{ref['role']}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # -----------------------------
 # Header
 # -----------------------------
@@ -129,7 +174,13 @@ st.caption("目前還是研究整理用的原型。我主要拿它比對文獻�
 # -----------------------------
 with st.sidebar:
     st.header("輸入製程條件")
-    preset_label = st.selectbox("先選一組參考文獻", list(PRESETS.keys()))
+    preset_label = st.selectbox(
+        "先選一組參考文獻",
+        PRESET_LABELS,
+        format_func=preset_display_label,
+    )
+    source_reference_card(PRESET_META.get(preset_label))
+
     if st.button("套用這組條件", use_container_width=True):
         load_preset(preset_label)
         st.rerun()
@@ -216,9 +267,11 @@ with overview_tab:
     m3.metric("TiN:PR 選擇比", f"{selectivity:.2f}")
 
     if exact_case is not None:
-        st.success(f"目前這組條件有找到相同的文獻案例：{exact_case['source']} / {exact_case['case']}")
+        st.success(f"目前這組條件有找到相同的文獻案例：{case_display(exact_case)}")
+        source_reference_card(exact_case)
     else:
-        st.info(f"資料庫裡沒有完全一樣的條件，所以先抓最接近的文獻案例來估：{closest_case['source']} / {closest_case['case']}")
+        st.info(f"資料庫裡沒有完全一樣的條件，所以先抓最接近的文獻案例來估：{case_display(closest_case)}")
+        source_reference_card(closest_case)
 
     left, right = st.columns([1.35, 1])
     with left:
@@ -269,10 +322,14 @@ with overview_tab:
         st.write(f"估算光阻損耗：**{pr_loss_nm:.1f} nm**")
 
 with literature_tab:
-    st.subheader("我整理的文獻資料")
+    st.subheader("參考文獻對照")
+    st.write("P001～P019 是我整理資料時使用的內部編號。這裡把編號、簡稱和正式論文名稱放在一起，方便回頭確認每一筆資料的來源。")
+    st.dataframe(pd.DataFrame(reference_rows()), use_container_width=True, hide_index=True)
+
+    st.markdown("#### 我整理進資料庫的製程資料")
     db = pd.DataFrame(LITERATURE_DB)
     compact = pd.DataFrame({
-        "文獻來源": db["source"],
+        "文獻來源": [short_source_label(value) for value in db["source"]],
         "案例": db["case"],
         "氣體 BCl₃/Cl₂/Ar/N₂": [f"{r.BCl3:g}/{r.Cl2:g}/{r.Ar:g}/{r.N2:g}" for r in db.itertuples()],
         "壓力（mTorr）": db["pressure"],
