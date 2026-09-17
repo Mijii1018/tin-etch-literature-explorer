@@ -1,2 +1,0 @@
-ChatGPT GitHub write-access test.
-This file can be removed after the connection is verified.
