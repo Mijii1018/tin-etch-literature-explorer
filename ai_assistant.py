@@ -389,28 +389,43 @@ def evidence_dataframe(items: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _human_value(value: Any, suffix: str = "") -> str:
+    number = _as_float(value)
+    if number is None:
+        return "未提供"
+    if abs(number - round(number)) < 1e-9:
+        text = str(int(round(number)))
+    else:
+        text = f"{number:.2f}".rstrip("0").rstrip(".")
+    return f"{text}{suffix}"
+
+
+def _human_case_summary(item: dict) -> str:
+    return (
+        f"來源：{short_source_label(item.get('source', ''))}\n"
+        f"案例：{item.get('case', '')}\n"
+        f"氣體流量：BCl₃ {_human_value(item.get('BCl3'), ' sccm')}、"
+        f"Cl₂ {_human_value(item.get('Cl2'), ' sccm')}、"
+        f"Ar {_human_value(item.get('Ar'), ' sccm')}、"
+        f"N₂ {_human_value(item.get('N2'), ' sccm')}\n"
+        f"製程壓力：{_human_value(item.get('pressure'), ' mTorr')}\n"
+        f"ICP / Source Power：{_human_value(item.get('source_power'), ' W')}\n"
+        f"Bias / Chuck：{_human_value(item.get('bias'))}\n"
+        f"側壁角度：{_human_value(item.get('angle'), '°')}\n"
+        f"TiN 蝕刻速率：{_human_value(item.get('etch_rate_nm_min'), ' nm/min')}\n"
+        f"TiN:PR 選擇比：{_human_value(item.get('selectivity'))}"
+    )
+
+
 def _evidence_text(items: list[dict]) -> str:
     blocks = []
     for i, item in enumerate(items, start=1):
         blocks.append(
             "\n".join([
-                f"[{i}] tier={item.get('_evidence_tier', 'C')}; comparability={item.get('_comparability', '一般相關案例')}",
-                f"support_note={item.get('_support_message', '')}",
-                f"source={item.get('source', '')}; case={item.get('case', '')}",
-                (
-                    "gas(sccm): "
-                    f"BCl3={item.get('BCl3')}, Cl2={item.get('Cl2')}, "
-                    f"Ar={item.get('Ar')}, N2={item.get('N2')}"
-                ),
-                (
-                    f"pressure={item.get('pressure')} mTorr; "
-                    f"source_power={item.get('source_power')} W; bias={item.get('bias')}"
-                ),
-                (
-                    f"angle={item.get('angle')} deg; "
-                    f"etch_rate={item.get('etch_rate_nm_min')} nm/min; "
-                    f"selectivity={item.get('selectivity')}"
-                ),
+                f"[{i}] 證據層級：{item.get('_evidence_tier', 'C')}",
+                f"可比較性：{item.get('_comparability', '一般相關案例')}",
+                f"資料支援提醒：{item.get('_support_message', '') or '無'}",
+                _human_case_summary(item),
             ])
         )
     return "\n\n".join(blocks)
@@ -444,15 +459,22 @@ def generate_ai_answer(
 7. 如果 support_supported=False，必須明確說明資料庫缺少哪些欄位；所有 C 級資料只能作背景，不得把它們包裝成可回答該問題的證據。
 8. 若其他條件同時改變，要明確指出混雜變因，不能把結果單獨歸因於目標變因。
 9. 可以提出下一步值得做的單一變因對照實驗，但不要宣稱最佳 recipe。
-10. 不要把內部欄位名稱如 tier=、comparability=、support_note= 原樣輸出給使用者。
-11. 若 question_type=lookup，請改用以下三個 Markdown 小節：
+10. 不要把內部欄位名稱如 tier=、comparability=、support_note=、source_power=、etch_rate=、angle= 原樣輸出給使用者。
+11. 所有輸出要用一般研究者看得懂的中文名稱，例如：
+- source_power → ICP / Source Power
+- bias → Bias / Chuck
+- angle → 側壁角度
+- etch_rate_nm_min → TiN 蝕刻速率
+- selectivity → TiN:PR 選擇比
+來源請使用 P 編號＋簡稱，不要顯示完整內部檔名。
+12. 若 question_type=lookup，請改用以下三個 Markdown 小節：
 ## 結論
 直接指出目前資料庫中的最高/最低或符合查詢條件的案例；若有並列要全部列出。
 ## 條件摘要
-簡潔列出主要案例的製程條件與目標數值。
+簡潔列出主要案例的製程條件與目標數值。使用自然中文與單位，不要輸出程式欄位名稱；每個案例最多 4–5 行。
 ## 提醒
 說明這只是目前資料庫中的紀錄，不代表最佳製程，也不代表因果關係。
-12. 若 question_type 不是 lookup，請固定使用以下四個 Markdown 小節輸出：
+13. 若 question_type 不是 lookup，請固定使用以下四個 Markdown 小節輸出：
 ## 結論
 先用 1–2 句直接回答目前證據能否支持使用者的問題。
 ## 證據依據
