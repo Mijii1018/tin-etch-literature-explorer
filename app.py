@@ -6,7 +6,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from config import LITERATURE_DB_PATH
-from ai_assistant import analyze_question_support, evidence_dataframe, generate_ai_answer, search_literature
+from ai_assistant import analyze_question_support, detect_question_type, evidence_dataframe, generate_ai_answer, search_literature
 from db_loader import DBValidationError, load_literature_db
 from literature import build_presets_from_db, closest_literature_case, exact_literature_match
 from plotter import draw_profile
@@ -363,29 +363,34 @@ with ai_tab:
             evidence = search_literature(question, LITERATURE_DB, limit=evidence_limit)
             support = analyze_question_support(question)
 
+            question_type = detect_question_type(question)
             st.markdown("### 2. 證據篩選")
-            if not support["supported"]:
-                st.warning("目前沒有足以直接回答此問題的資料欄位。")
-                st.caption(support["message"])
-            tier_counts = {"A": 0, "B": 0, "C": 0}
-            for item in evidence:
-                tier = item.get("_evidence_tier", "C")
-                if tier in tier_counts:
-                    tier_counts[tier] += 1
+            if question_type == "lookup":
+                st.info("這是一個資料查詢型問題，系統會直接依目標欄位排序，不進行 A/B/C 因果分級。")
+            else:
+                if not support["supported"]:
+                    st.warning("目前沒有足以直接回答此問題的資料欄位。")
+                    st.caption(support["message"])
 
-            t1, t2, t3 = st.columns(3)
-            t1.markdown(
-                f'<div class="tier-card"><strong>A　{tier_counts["A"]}</strong><div class="tier-note">高可比｜接近單一變因對照</div></div>',
-                unsafe_allow_html=True,
-            )
-            t2.markdown(
-                f'<div class="tier-card"><strong>B　{tier_counts["B"]}</strong><div class="tier-note">可參考｜仍有來源或條件差異</div></div>',
-                unsafe_allow_html=True,
-            )
-            t3.markdown(
-                f'<div class="tier-card"><strong>C　{tier_counts["C"]}</strong><div class="tier-note">背景資料｜不支持因果結論</div></div>',
-                unsafe_allow_html=True,
-            )
+                tier_counts = {"A": 0, "B": 0, "C": 0}
+                for item in evidence:
+                    tier = item.get("_evidence_tier", "C")
+                    if tier in tier_counts:
+                        tier_counts[tier] += 1
+
+                t1, t2, t3 = st.columns(3)
+                t1.markdown(
+                    f'<div class="tier-card"><strong>A　{tier_counts["A"]}</strong><div class="tier-note">高可比｜接近單一變因對照</div></div>',
+                    unsafe_allow_html=True,
+                )
+                t2.markdown(
+                    f'<div class="tier-card"><strong>B　{tier_counts["B"]}</strong><div class="tier-note">可參考｜仍有來源或條件差異</div></div>',
+                    unsafe_allow_html=True,
+                )
+                t3.markdown(
+                    f'<div class="tier-card"><strong>C　{tier_counts["C"]}</strong><div class="tier-note">背景資料｜不支持因果結論</div></div>',
+                    unsafe_allow_html=True,
+                )
 
             st.markdown("#### 本次檢索到的文獻證據")
             st.dataframe(
@@ -393,10 +398,13 @@ with ai_tab:
                 use_container_width=True,
                 hide_index=True,
             )
-            st.caption(
-                "A/B/C 是系統對『這個問題能不能用這些資料回答』的可比較性分級，"
-                "不是對論文本身品質的評分。不同研究的機台、樣品與條件仍可能不同。"
-            )
+            if question_type == "lookup":
+                st.caption("此表依問題指定的目標欄位排序；數值最高或最低僅代表目前資料庫中的紀錄。")
+            else:
+                st.caption(
+                    "A/B/C 是系統對『這個問題能不能用這些資料回答』的可比較性分級，"
+                    "不是對論文本身品質的評分。不同研究的機台、樣品與條件仍可能不同。"
+                )
 
             try:
                 api_key = st.secrets.get("GEMINI_API_KEY", "")
