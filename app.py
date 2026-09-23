@@ -359,17 +359,17 @@ with ai_tab:
             )
 
             try:
-                api_key = st.secrets.get("OPENAI_API_KEY", "")
-                model_name = st.secrets.get("OPENAI_MODEL", "gpt-5.6-luna")
+                api_key = st.secrets.get("GEMINI_API_KEY", "")
+                model_name = st.secrets.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
             except Exception:
                 api_key = ""
-                model_name = "gpt-5.6-luna"
+                model_name = "gemini-3.5-flash-lite"
 
             st.markdown("#### 生成式 AI 整理")
             if not api_key:
                 st.info(
                     "目前還沒有設定 AI API Key，所以文獻檢索已經可以測試，但生成式回答暫時關閉。"
-                    "部署到 Streamlit Cloud 後，在 Secrets 加入 OPENAI_API_KEY 即可啟用。"
+                    "部署到 Streamlit Cloud 後，在 Secrets 加入 GEMINI_API_KEY 即可啟用。"
                 )
             else:
                 try:
