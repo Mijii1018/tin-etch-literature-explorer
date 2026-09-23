@@ -1,4 +1,5 @@
 import re
+import time
 from typing import Any
 
 import pandas as pd
@@ -308,6 +309,7 @@ def generate_ai_answer(
     evidence: list[dict],
     api_key: str,
     model: str = "gemini-3.5-flash-lite",
+    fallback_model: str = "gemini-3.8-flash",
 ) -> str:
     if not evidence:
         return "目前資料庫沒有找到可用的文獻案例，因此不產生製程結論。"
@@ -360,12 +362,37 @@ def generate_ai_answer(
 
 請依 A/B/C 證據層級回答。若沒有足夠的 A/B 證據，直接說無法由現有資料判斷獨立影響。"""
 
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=instructions,
-            temperature=0.2,
-        ),
-    )
-    return response.text or "模型沒有回傳文字內容。"
+    models_to_try = []
+    for name in (model, fallback_model):
+        if name and name not in models_to_try:
+            models_to_try.append(name)
+
+    last_error = None
+    for model_name in models_to_try:
+        for attempt in range(2):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=instructions,
+                        temperature=0.2,
+                    ),
+                )
+                return response.text or "模型沒有回傳文字內容。"
+            except Exception as exc:
+                last_error = exc
+                message = str(exc).lower()
+                is_transient = (
+                    "503" in message
+                    or "unavailable" in message
+                    or "high demand" in message
+                    or "429" in message
+                    or "resource_exhausted" in message
+                )
+                if is_transient and attempt == 0:
+                    time.sleep(1.2)
+                    continue
+                break
+
+    raise RuntimeError("AI_SERVICE_BUSY") from last_error
