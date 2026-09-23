@@ -66,6 +66,14 @@ st.markdown(
       .reference-card {border:1px solid #e6e0d8; padding:.75rem .85rem; border-radius:8px; background:#faf7f2; margin:.35rem 0 .8rem 0; line-height:1.45;}
       .reference-title {font-size:.82rem; color:#4b5563; margin-top:.2rem;}
       .quick-note {padding:.65rem .85rem; border:1px solid #e6e0d8; border-radius:8px; background:#fff;}
+      .ai-hero {border:1px solid #e6e0d8; background:#ffffff; border-radius:12px; padding:18px 20px; margin:.4rem 0 1rem 0;}
+      .ai-hero-title {font-size:1.05rem; font-weight:700; margin-bottom:.35rem;}
+      .ai-hero-sub {font-size:.92rem; color:#5b6472; line-height:1.6;}
+      .tier-card {border:1px solid #e6e0d8; background:#fff; border-radius:10px; padding:12px 14px;}
+      .tier-card strong {font-size:1.2rem;}
+      .tier-note {font-size:.82rem; color:#6b7280; margin-top:.2rem;}
+      .ai-result {border:1px solid #e6e0d8; background:#fff; border-radius:12px; padding:18px 20px; margin-top:.6rem;}
+      div[data-testid="stDataFrame"] {border:1px solid #e6e0d8; border-radius:10px; overflow:hidden;}
       div[data-testid="stMetric"] [data-testid="stMetricValue"] {font-size:1.8rem;}
       @media (max-width: 768px) {
         .block-container {padding-top: 1rem; padding-left: .9rem; padding-right: .9rem; padding-bottom: 2rem;}
@@ -323,39 +331,73 @@ with overview_tab:
         st.write(f"估算光阻損耗：**{pr_loss_nm:.1f} nm**")
 
 with ai_tab:
-    st.subheader("AI 文獻助理")
-    st.write(
-        "這一頁先從我整理的 TiN 蝕刻資料庫找相關案例，再交給生成式 AI 做整理。"
-        "AI 不會直接替你決定最佳 recipe，回答也只應該建立在下方顯示的文獻證據上。"
+    st.markdown(
+        """
+        <div class="ai-hero">
+          <div class="ai-hero-title">AI 文獻助理</div>
+          <div class="ai-hero-sub">
+            先從目前整理的 TiN 蝕刻資料庫找出可比較證據，再由生成式 AI 協助整理。
+            系統會區分證據層級，資料不足時不強行下結論，也不直接產生最佳 recipe。
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    st.markdown("#### 先問一個製程問題")
+    st.markdown("### 1. 提出研究問題")
     question = st.text_area(
-        "例如：Ar 增加對 TiN 側壁角度有什麼影響？",
-        height=100,
-        placeholder="輸入 TiN 乾式蝕刻相關問題……",
+        "製程問題",
+        height=105,
+        placeholder="例如：Ar 增加對 TiN 側壁角度有什麼影響？",
         key="ai_question",
+        label_visibility="collapsed",
     )
 
-    col_a, col_b = st.columns([1, 2])
-    evidence_limit = col_a.selectbox("檢索幾筆文獻案例", [3, 5, 8], index=1)
-    run_ai = col_b.button("搜尋文獻並由 AI 整理", type="primary", use_container_width=True)
+    c1, c2 = st.columns([1, 2.2])
+    evidence_limit = c1.selectbox(
+        "證據筆數",
+        [3, 5, 8],
+        index=1,
+        help="只控制顯示與送入 AI 的證據數量，不代表資料越多越可信。",
+    )
+    run_ai = c2.button("開始分析", type="primary", use_container_width=True)
 
     if run_ai:
         if not question.strip():
-            st.warning("請先輸入一個問題。")
+            st.warning("請先輸入一個研究問題。")
         else:
             evidence = search_literature(question, LITERATURE_DB, limit=evidence_limit)
 
-            st.markdown("#### 系統實際找到的文獻證據")
+            st.markdown("### 2. 證據篩選")
+            tier_counts = {"A": 0, "B": 0, "C": 0}
+            for item in evidence:
+                tier = item.get("_evidence_tier", "C")
+                if tier in tier_counts:
+                    tier_counts[tier] += 1
+
+            t1, t2, t3 = st.columns(3)
+            t1.markdown(
+                f'<div class="tier-card"><strong>A　{tier_counts["A"]}</strong><div class="tier-note">高可比｜接近單一變因對照</div></div>',
+                unsafe_allow_html=True,
+            )
+            t2.markdown(
+                f'<div class="tier-card"><strong>B　{tier_counts["B"]}</strong><div class="tier-note">可參考｜仍有來源或條件差異</div></div>',
+                unsafe_allow_html=True,
+            )
+            t3.markdown(
+                f'<div class="tier-card"><strong>C　{tier_counts["C"]}</strong><div class="tier-note">背景資料｜不支持因果結論</div></div>',
+                unsafe_allow_html=True,
+            )
+
+            st.markdown("#### 本次檢索到的文獻證據")
             st.dataframe(
                 evidence_dataframe(evidence),
                 use_container_width=True,
                 hide_index=True,
             )
             st.caption(
-                "這些資料來自目前內建的 TiN 蝕刻文獻庫。不同研究的機台、樣品與條件不完全一致，"
-                "所以這裡先用來做文獻探索與趨勢整理，不視為同一套 DOE。"
+                "A/B/C 是系統對『這個問題能不能用這些資料回答』的可比較性分級，"
+                "不是對論文本身品質的評分。不同研究的機台、樣品與條件仍可能不同。"
             )
 
             try:
@@ -365,33 +407,38 @@ with ai_tab:
                 api_key = ""
                 model_name = "gemini-3.5-flash-lite"
 
-            st.markdown("#### 生成式 AI 整理")
+            st.markdown("### 3. AI 研究整理")
             if not api_key:
-                st.info(
-                    "目前還沒有設定 AI API Key，所以文獻檢索已經可以測試，但生成式回答暫時關閉。"
-                    "部署到 Streamlit Cloud 後，在 Secrets 加入 GEMINI_API_KEY 即可啟用。"
-                )
+                st.info("文獻檢索可以正常使用，但目前尚未設定 Gemini API Key，因此生成式整理暫時關閉。")
             else:
                 try:
-                    with st.spinner("AI 正在依照這些文獻資料整理回答……"):
+                    with st.spinner("正在依證據層級整理回答……"):
                         answer = generate_ai_answer(
                             question=question,
                             evidence=evidence,
                             api_key=api_key,
                             model=model_name,
                         )
+                    st.markdown('<div class="ai-result">', unsafe_allow_html=True)
                     st.markdown(answer)
+                    st.markdown('</div>', unsafe_allow_html=True)
                 except Exception as exc:
-                    st.error(f"AI 回答失敗：{exc}")
-                    st.caption("文獻檢索結果仍可正常使用，請再檢查 API Key、模型名稱或服務狀態。")
+                    st.error(f"AI 整理失敗：{exc}")
+                    st.caption("文獻檢索結果仍可使用；請檢查 API Key、模型名稱或服務狀態。")
 
-    with st.expander("這個 AI 功能目前做到哪裡？"):
+    with st.expander("分析原則與目前限制"):
         st.markdown(
             """
-            - **已做：** 自然語言問題輸入、從本地文獻庫挑出相關案例、把證據交給生成式 AI 整理。
-            - **刻意限制：** AI 只能依檢索到的資料回答，並要求標出 [1]、[2] 等證據編號。
-            - **目前不做：** 自動搜尋整個網路、自動下載論文、訓練大型模型、直接產生最佳製程 recipe。
-            - **作品定位：** 先做成 TiN 乾式蝕刻的研究整理與條件探索原型。
+            **證據層級**
+            - **A｜高可比：** 目標輸出有實測值，目標變因有改變，其他條件盡量固定。
+            - **B｜可參考：** 目標輸出完整，但仍存在來源或其他製程條件差異。
+            - **C｜背景資料：** 只能協助理解脈絡，不拿來支持因果或方向性結論。
+
+            **目前範圍**
+            - 只使用本地整理的 TiN 蝕刻文獻資料。
+            - 不自動搜尋網路、不自動下載論文。
+            - 不直接產生最佳製程 recipe。
+            - 資料不足時，優先說明缺口，而不是勉強生成結論。
             """
         )
 
