@@ -96,6 +96,37 @@ def analyze_question_support(question: str) -> dict[str, Any]:
     return {"supported": True, "topic": None, "message": ""}
 
 
+def detect_question_type(question: str) -> str:
+    """Classify the research intent so retrieval can use the right logic."""
+    q = _normalize(question)
+
+    lookup_patterns = [
+        "哪一組", "哪組", "最高", "最低", "最大", "最小",
+        "最垂直", "最快", "最慢", "排名", "top", "highest", "lowest",
+    ]
+    if any(term in q for term in lookup_patterns):
+        return "lookup"
+
+    support = analyze_question_support(question)
+    if not support["supported"]:
+        return "unsupported"
+
+    impact_patterns = [
+        "影響", "增加", "降低", "提升", "下降", "變化", "關係",
+        "effect", "impact", "increase", "decrease",
+    ]
+    if any(term in q for term in impact_patterns):
+        return "impact"
+
+    return "descriptive"
+
+
+def _lookup_direction(question: str) -> str:
+    q = _normalize(question)
+    ascending_terms = ["最低", "最小", "最慢", "lowest", "minimum"]
+    return "asc" if any(term in q for term in ascending_terms) else "desc"
+
+
 def detect_target_variable(question: str) -> str | None:
     q = _normalize(question)
     for field, aliases in TARGET_ALIASES.items():
@@ -207,6 +238,42 @@ def search_literature(question: str, literature_db: list[dict], limit: int = 5) 
     target = detect_target_variable(question)
     outcome = detect_outcome_variable(question)
     support = analyze_question_support(question)
+    question_type = detect_question_type(question)
+
+    if question_type == "lookup" and outcome is not None:
+        rows = []
+        for idx, item in enumerate(literature_db):
+            value = _as_float(item.get(outcome))
+            if value is None:
+                continue
+            enriched = dict(item)
+            enriched["_comparability"] = "查詢結果｜依目標欄位排序"
+            enriched["_evidence_tier"] = "Q"
+            enriched["_target_variable"] = target
+            enriched["_outcome_variable"] = outcome
+            enriched["_question_type"] = "lookup"
+            rows.append((value, idx, enriched))
+
+        reverse = _lookup_direction(question) == "desc"
+        rows.sort(key=lambda x: (x[0], -x[1]) if not reverse else (-x[0], x[1]))
+
+        if rows:
+            best_value = rows[0][0]
+            tied = [item for value, _, item in rows if abs(value - best_value) < 1e-9]
+            if len(tied) >= limit:
+                return tied[:limit]
+
+            selected = tied[:]
+            seen = {(str(x.get("source","")), str(x.get("case",""))) for x in selected}
+            for _, _, item in rows:
+                key = (str(item.get("source","")), str(item.get("case","")))
+                if key in seen:
+                    continue
+                selected.append(item)
+                seen.add(key)
+                if len(selected) >= limit:
+                    break
+            return selected
 
     if not support["supported"]:
         # Show only related background records; none may be treated as A/B evidence.
@@ -363,6 +430,7 @@ def generate_ai_answer(
     target = detect_target_variable(question)
     outcome = detect_outcome_variable(question)
     support = analyze_question_support(question)
+    question_type = detect_question_type(question)
 
     instructions = """你是半導體乾式蝕刻研究助理。請只根據提供的 evidence 回答，不得補造文獻數據或最佳 recipe。
 
@@ -376,7 +444,15 @@ def generate_ai_answer(
 7. 如果 support_supported=False，必須明確說明資料庫缺少哪些欄位；所有 C 級資料只能作背景，不得把它們包裝成可回答該問題的證據。
 8. 若其他條件同時改變，要明確指出混雜變因，不能把結果單獨歸因於目標變因。
 9. 可以提出下一步值得做的單一變因對照實驗，但不要宣稱最佳 recipe。
-10. 請固定使用以下四個 Markdown 小節輸出：
+10. 不要把內部欄位名稱如 tier=、comparability=、support_note= 原樣輸出給使用者。
+11. 若 question_type=lookup，請改用以下三個 Markdown 小節：
+## 結論
+直接指出目前資料庫中的最高/最低或符合查詢條件的案例；若有並列要全部列出。
+## 條件摘要
+簡潔列出主要案例的製程條件與目標數值。
+## 提醒
+說明這只是目前資料庫中的紀錄，不代表最佳製程，也不代表因果關係。
+12. 若 question_type 不是 lookup，請固定使用以下四個 Markdown 小節輸出：
 ## 結論
 先用 1–2 句直接回答目前證據能否支持使用者的問題。
 ## 證據依據
@@ -407,6 +483,10 @@ def generate_ai_answer(
     prompt = f"""使用者問題：
 {question}
 
+question_type={question_type}
+
+{question}
+
 {target_note}
 {outcome_note}
 {support_note}
@@ -414,7 +494,8 @@ def generate_ai_answer(
 目前從本地 TiN 蝕刻資料庫檢索到的 evidence：
 {_evidence_text(evidence)}
 
-請依 A/B/C 證據層級回答。若沒有足夠的 A/B 證據，直接說無法由現有資料判斷獨立影響。"""
+若 question_type=lookup，請只根據排序後 evidence 做資料庫查詢摘要，不需要做 A/B/C 因果判斷。
+其他問題則依 A/B/C 證據層級回答；若沒有足夠的 A/B 證據，直接說無法由現有資料判斷獨立影響。"""
 
     models_to_try = []
     for name in (model, fallback_model):
