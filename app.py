@@ -6,6 +6,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from config import LITERATURE_DB_PATH
+from ai_assistant import evidence_dataframe, generate_ai_answer, search_literature
 from db_loader import DBValidationError, load_literature_db
 from literature import build_presets_from_db, closest_literature_case, exact_literature_match
 from plotter import draw_profile
@@ -251,8 +252,8 @@ closest_case, closest_dist = closest_literature_case(LITERATURE_DB, BCl3, Cl2, A
 # -----------------------------
 # Tabs
 # -----------------------------
-overview_tab, literature_tab, validation_tab, about_tab = st.tabs(
-    ["操作與結果", "文獻資料", "目前模型差多少", "這個工具怎麼開始的"]
+overview_tab, ai_tab, literature_tab, validation_tab, about_tab = st.tabs(
+    ["操作與結果", "AI 文獻助理", "文獻資料", "目前模型差多少", "這個工具怎麼開始的"]
 )
 
 with overview_tab:
@@ -320,6 +321,80 @@ with overview_tab:
         c3.metric("估算底部線寬", f"{cd_bottom_um:.2f} µm")
         st.write(f"估算 TiN 蝕刻深度：**{etched_depth_nm:.1f} nm**")
         st.write(f"估算光阻損耗：**{pr_loss_nm:.1f} nm**")
+
+with ai_tab:
+    st.subheader("AI 文獻助理")
+    st.write(
+        "這一頁先從我整理的 TiN 蝕刻資料庫找相關案例，再交給生成式 AI 做整理。"
+        "AI 不會直接替你決定最佳 recipe，回答也只應該建立在下方顯示的文獻證據上。"
+    )
+
+    st.markdown("#### 先問一個製程問題")
+    question = st.text_area(
+        "例如：Ar 增加對 TiN 側壁角度有什麼影響？",
+        height=100,
+        placeholder="輸入 TiN 乾式蝕刻相關問題……",
+        key="ai_question",
+    )
+
+    col_a, col_b = st.columns([1, 2])
+    evidence_limit = col_a.selectbox("檢索幾筆文獻案例", [3, 5, 8], index=1)
+    run_ai = col_b.button("搜尋文獻並由 AI 整理", type="primary", use_container_width=True)
+
+    if run_ai:
+        if not question.strip():
+            st.warning("請先輸入一個問題。")
+        else:
+            evidence = search_literature(question, LITERATURE_DB, limit=evidence_limit)
+
+            st.markdown("#### 系統實際找到的文獻證據")
+            st.dataframe(
+                evidence_dataframe(evidence),
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "這些資料來自目前內建的 TiN 蝕刻文獻庫。不同研究的機台、樣品與條件不完全一致，"
+                "所以這裡先用來做文獻探索與趨勢整理，不視為同一套 DOE。"
+            )
+
+            try:
+                api_key = st.secrets.get("OPENAI_API_KEY", "")
+                model_name = st.secrets.get("OPENAI_MODEL", "gpt-5.6-luna")
+            except Exception:
+                api_key = ""
+                model_name = "gpt-5.6-luna"
+
+            st.markdown("#### 生成式 AI 整理")
+            if not api_key:
+                st.info(
+                    "目前還沒有設定 AI API Key，所以文獻檢索已經可以測試，但生成式回答暫時關閉。"
+                    "部署到 Streamlit Cloud 後，在 Secrets 加入 OPENAI_API_KEY 即可啟用。"
+                )
+            else:
+                try:
+                    with st.spinner("AI 正在依照這些文獻資料整理回答……"):
+                        answer = generate_ai_answer(
+                            question=question,
+                            evidence=evidence,
+                            api_key=api_key,
+                            model=model_name,
+                        )
+                    st.markdown(answer)
+                except Exception as exc:
+                    st.error(f"AI 回答失敗：{exc}")
+                    st.caption("文獻檢索結果仍可正常使用，請再檢查 API Key、模型名稱或服務狀態。")
+
+    with st.expander("這個 AI 功能目前做到哪裡？"):
+        st.markdown(
+            """
+            - **已做：** 自然語言問題輸入、從本地文獻庫挑出相關案例、把證據交給生成式 AI 整理。
+            - **刻意限制：** AI 只能依檢索到的資料回答，並要求標出 [1]、[2] 等證據編號。
+            - **目前不做：** 自動搜尋整個網路、自動下載論文、訓練大型模型、直接產生最佳製程 recipe。
+            - **作品定位：** 先做成 TiN 乾式蝕刻的研究整理與條件探索原型。
+            """
+        )
+
 
 with literature_tab:
     st.subheader("參考文獻對照")
