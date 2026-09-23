@@ -141,9 +141,9 @@ def _pair_comparability(a: dict, b: dict, target: str | None) -> tuple[float, st
     if same_source and penalty <= 0.22 and changed_context <= 1:
         return score, "A｜高可比：同來源且其他條件近似", "A"
     if same_source and penalty <= 0.85 and changed_context <= 2:
-        return score, "B｜次佳：同來源但仍有其他變因差異", "B"
+        return score, "B｜可參考：同來源，但仍有其他條件差異", "B"
     if (not same_source) and penalty <= 0.35 and changed_context <= 1:
-        return score, "B｜次佳：跨來源但其他條件較接近", "B"
+        return score, "B｜可參考：輸出完整，但仍有來源或條件差異", "B"
     return score, "C｜背景：僅能作相關案例參考", "C"
 
 
@@ -228,7 +228,7 @@ def search_literature(question: str, literature_db: list[dict], limit: int = 5) 
         score = _base_relevance(question, item)
         enriched = dict(item)
         enriched["_comparability"] = (
-            "B｜有目標輸出值，但缺乏單一變因對照"
+            "B｜可參考：輸出完整，但缺乏單一變因對照"
             if outcome is not None
             else "一般相關案例"
         )
@@ -327,7 +327,15 @@ def generate_ai_answer(
 6. 如果沒有 A/B 證據，直接說目前資料庫不足以回答該變因的獨立影響，不要勉強推論。
 7. 若其他條件同時改變，要明確指出混雜變因，不能把結果單獨歸因於目標變因。
 8. 可以提出下一步值得做的單一變因對照實驗，但不要宣稱最佳 recipe。
-9. 結尾用「資料限制」簡短說明目前證據能支持到什麼程度。
+9. 請固定使用以下四個 Markdown 小節輸出：
+## 結論
+先用 1–2 句直接回答目前證據能否支持使用者的問題。
+## 證據依據
+只列最重要的 A/B 級 evidence；若只有 C 級，明確說只能作背景。
+## 下一步建議
+只提出 1–2 個可驗證、範圍小的實驗或資料補強方向。
+## 資料限制
+簡短說明目前證據能支持到什麼程度。
 """
 
     target_note = (
