@@ -12,7 +12,7 @@ from references import short_source_label
 FIELD_TERMS = {
     "angle": ["側壁", "側壁角度", "角度", "垂直", "profile", "sidewall", "angle"],
     "etch_rate_nm_min": ["蝕刻速率", "etch rate", "rate", "速率"],
-    "selectivity": ["選擇比", "selectivity", "光阻", "photoresist", "pr"],
+    "selectivity": ["選擇比", "selectivity"],
     "pressure": ["壓力", "pressure", "mtorr"],
     "bias": ["bias", "偏壓", "chuck"],
     "source_power": ["icp", "source power", "功率", "源功率"],
@@ -71,6 +71,29 @@ def _record_text(item: dict[str, Any]) -> str:
         f"selectivity {item.get('selectivity', '')}",
     ]
     return _normalize(" ".join(map(str, parts)))
+
+
+PHOTORESIST_TERMS = ["光阻", "photoresist", "mask", "遮罩", "pr thickness", "pr etch", "mask erosion"]
+
+
+def analyze_question_support(question: str) -> dict[str, Any]:
+    """Judge whether the current structured database can directly support the question."""
+    q = _normalize(question)
+
+    # Generic photoresist-role questions need fields that are not currently stored.
+    asks_photoresist = any(term in q for term in PHOTORESIST_TERMS)
+    asks_selectivity = any(term in q for term in ["選擇比", "selectivity"])
+    if asks_photoresist and not asks_selectivity:
+        return {
+            "supported": False,
+            "topic": "光阻",
+            "message": (
+                "目前資料庫沒有光阻厚度、光阻蝕刻率或遮罩消耗等欄位；"
+                "現有選擇比資料只能作背景，不能直接回答光阻在模擬器中的角色。"
+            ),
+        }
+
+    return {"supported": True, "topic": None, "message": ""}
 
 
 def detect_target_variable(question: str) -> str | None:
@@ -183,6 +206,25 @@ def search_literature(question: str, literature_db: list[dict], limit: int = 5) 
     """
     target = detect_target_variable(question)
     outcome = detect_outcome_variable(question)
+    support = analyze_question_support(question)
+
+    if not support["supported"]:
+        # Show only related background records; none may be treated as A/B evidence.
+        ranked = []
+        for idx, item in enumerate(literature_db):
+            score = _base_relevance(question, item)
+            # For generic photoresist questions, selectivity-bearing rows are the most relevant background.
+            if support.get("topic") == "光阻" and _has_value(item, "selectivity"):
+                score += 3.0
+            enriched = dict(item)
+            enriched["_comparability"] = "C｜背景：目前資料庫缺少此問題所需的直接欄位"
+            enriched["_evidence_tier"] = "C"
+            enriched["_target_variable"] = target
+            enriched["_outcome_variable"] = outcome
+            enriched["_support_message"] = support["message"]
+            ranked.append((score, idx, enriched))
+        ranked.sort(key=lambda x: (-x[0], x[1]))
+        return [item for _, _, item in ranked[:limit]]
 
     usable = [item for item in literature_db if _has_value(item, outcome)]
     background = [item for item in literature_db if item not in usable]
@@ -286,6 +328,7 @@ def _evidence_text(items: list[dict]) -> str:
         blocks.append(
             "\n".join([
                 f"[{i}] tier={item.get('_evidence_tier', 'C')}; comparability={item.get('_comparability', '一般相關案例')}",
+                f"support_note={item.get('_support_message', '')}",
                 f"source={item.get('source', '')}; case={item.get('case', '')}",
                 (
                     "gas(sccm): "
@@ -319,6 +362,7 @@ def generate_ai_answer(
     client = genai.Client(api_key=api_key)
     target = detect_target_variable(question)
     outcome = detect_outcome_variable(question)
+    support = analyze_question_support(question)
 
     instructions = """你是半導體乾式蝕刻研究助理。請只根據提供的 evidence 回答，不得補造文獻數據或最佳 recipe。
 
@@ -328,10 +372,11 @@ def generate_ai_answer(
 3. 證據層級 A = 最佳對照；B = 可參考但仍有混雜變因；C = 只能作背景。
 4. 如果使用者問某個變因增加/降低對某個輸出的影響，只有 A 或 B 證據且該輸出有實測值時，才可以討論可能趨勢。
 5. C 級資料不能拿來支持因果或方向性結論。
-6. 如果沒有 A/B 證據，直接說目前資料庫不足以回答該變因的獨立影響，不要勉強推論。
-7. 若其他條件同時改變，要明確指出混雜變因，不能把結果單獨歸因於目標變因。
-8. 可以提出下一步值得做的單一變因對照實驗，但不要宣稱最佳 recipe。
-9. 請固定使用以下四個 Markdown 小節輸出：
+6. 如果沒有 A/B 證據，直接說目前資料庫不足以回答，不要勉強推論。
+7. 如果 support_supported=False，必須明確說明資料庫缺少哪些欄位；所有 C 級資料只能作背景，不得把它們包裝成可回答該問題的證據。
+8. 若其他條件同時改變，要明確指出混雜變因，不能把結果單獨歸因於目標變因。
+9. 可以提出下一步值得做的單一變因對照實驗，但不要宣稱最佳 recipe。
+10. 請固定使用以下四個 Markdown 小節輸出：
 ## 結論
 先用 1–2 句直接回答目前證據能否支持使用者的問題。
 ## 證據依據
@@ -353,11 +398,18 @@ def generate_ai_answer(
         else "本題沒有辨識到單一觀察輸出。"
     )
 
+    support_note = (
+        f"資料支援判斷：不足。{support['message']}"
+        if not support["supported"]
+        else "資料支援判斷：可進一步依 A/B/C 證據層級分析。"
+    )
+
     prompt = f"""使用者問題：
 {question}
 
 {target_note}
 {outcome_note}
+{support_note}
 
 目前從本地 TiN 蝕刻資料庫檢索到的 evidence：
 {_evidence_text(evidence)}
