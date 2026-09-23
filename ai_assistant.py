@@ -6,6 +6,8 @@ import pandas as pd
 from google import genai
 from google.genai import types
 
+from references import short_source_label
+
 
 FIELD_TERMS = {
     "angle": ["側壁", "側壁角度", "角度", "垂直", "profile", "sidewall", "angle"],
@@ -262,7 +264,7 @@ def evidence_dataframe(items: list[dict]) -> pd.DataFrame:
             "證據": f"[{i}]",
             "證據層級": item.get("_evidence_tier", "C"),
             "可比較性": item.get("_comparability", "一般相關案例"),
-            "來源": item.get("source", ""),
+            "來源": short_source_label(item.get("source", "")),
             "案例": item.get("case", ""),
             "BCl₃": item.get("BCl3"),
             "Cl₂": item.get("Cl2"),
