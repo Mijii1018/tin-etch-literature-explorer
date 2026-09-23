@@ -6,7 +6,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from config import LITERATURE_DB_PATH
-from ai_assistant import evidence_dataframe, generate_ai_answer, search_literature
+from ai_assistant import analyze_question_support, evidence_dataframe, generate_ai_answer, search_literature
 from db_loader import DBValidationError, load_literature_db
 from literature import build_presets_from_db, closest_literature_case, exact_literature_match
 from plotter import draw_profile
@@ -361,8 +361,12 @@ with ai_tab:
             st.warning("請先輸入一個研究問題。")
         else:
             evidence = search_literature(question, LITERATURE_DB, limit=evidence_limit)
+            support = analyze_question_support(question)
 
             st.markdown("### 2. 證據篩選")
+            if not support["supported"]:
+                st.warning("目前沒有足以直接回答此問題的資料欄位。")
+                st.caption(support["message"])
             tier_counts = {"A": 0, "B": 0, "C": 0}
             for item in evidence:
                 tier = item.get("_evidence_tier", "C")
