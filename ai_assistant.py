@@ -1,4 +1,3 @@
-import math
 import re
 from typing import Any
 
@@ -8,8 +7,8 @@ from google.genai import types
 
 
 FIELD_TERMS = {
-    "sidewall": ["側壁", "角度", "垂直", "profile", "sidewall", "angle"],
-    "etch_rate": ["蝕刻速率", "etch rate", "rate", "速率"],
+    "angle": ["側壁", "側壁角度", "角度", "垂直", "profile", "sidewall", "angle"],
+    "etch_rate_nm_min": ["蝕刻速率", "etch rate", "rate", "速率"],
     "selectivity": ["選擇比", "selectivity", "光阻", "photoresist", "pr"],
     "pressure": ["壓力", "pressure", "mtorr"],
     "bias": ["bias", "偏壓", "chuck"],
@@ -31,6 +30,18 @@ TARGET_ALIASES = {
     "pressure": FIELD_TERMS["pressure"],
     "bias": FIELD_TERMS["bias"],
     "source_power": FIELD_TERMS["source_power"],
+}
+
+OUTCOME_ALIASES = {
+    "angle": FIELD_TERMS["angle"],
+    "etch_rate_nm_min": FIELD_TERMS["etch_rate_nm_min"],
+    "selectivity": FIELD_TERMS["selectivity"],
+}
+
+OUTCOME_LABELS = {
+    "angle": "側壁角度",
+    "etch_rate_nm_min": "蝕刻速率",
+    "selectivity": "選擇比",
 }
 
 CONTEXT_FIELDS = ["BCl3", "Cl2", "Ar", "N2", "pressure", "bias", "source_power"]
@@ -67,13 +78,30 @@ def detect_target_variable(question: str) -> str | None:
     return None
 
 
+def detect_outcome_variable(question: str) -> str | None:
+    q = _normalize(question)
+    for field, aliases in OUTCOME_ALIASES.items():
+        if any(alias in q for alias in aliases):
+            return field
+    return None
+
+
 def _as_float(value: Any) -> float | None:
     try:
         if value is None or value == "":
             return None
-        return float(value)
+        value = float(value)
+        if pd.isna(value):
+            return None
+        return value
     except (TypeError, ValueError):
         return None
+
+
+def _has_value(item: dict, field: str | None) -> bool:
+    if field is None:
+        return True
+    return _as_float(item.get(field)) is not None
 
 
 def _normalized_distance(a: Any, b: Any, scale: float = 1.0) -> float:
@@ -84,38 +112,39 @@ def _normalized_distance(a: Any, b: Any, scale: float = 1.0) -> float:
     return abs(av - bv) / max(scale, abs(av), abs(bv), 1.0)
 
 
-def _pair_comparability(a: dict, b: dict, target: str | None) -> tuple[float, str]:
+def _pair_comparability(a: dict, b: dict, target: str | None) -> tuple[float, str, str]:
     if target is None:
-        return 0.0, "一般相關案例"
+        return 0.0, "一般相關案例", "C"
 
     same_source = str(a.get("source", "")).strip() == str(b.get("source", "")).strip()
     score = 3.0 if same_source else 0.0
 
     target_diff = _normalized_distance(a.get(target), b.get(target))
     if target_diff <= 0.01:
-        return -5.0, "目標變因沒有改變"
+        return -10.0, "目標變因沒有改變", "C"
 
     score += min(target_diff, 2.0) * 1.5
 
     penalty = 0.0
+    changed_context = 0
     for field in CONTEXT_FIELDS:
         if field == target:
             continue
         scale = 10.0 if field in {"BCl3", "Cl2", "Ar", "N2"} else 100.0
-        penalty += _normalized_distance(a.get(field), b.get(field), scale=scale)
+        dist = _normalized_distance(a.get(field), b.get(field), scale=scale)
+        penalty += dist
+        if dist > 0.08:
+            changed_context += 1
 
     score -= penalty
 
-    if same_source and penalty <= 0.30:
-        label = "高可比：同來源且其他條件近似"
-    elif same_source and penalty <= 0.80:
-        label = "中可比：同來源但其他條件仍有差異"
-    elif penalty <= 0.45:
-        label = "中可比：跨來源但其他條件較接近"
-    else:
-        label = "低可比：僅能作相關案例參考"
-
-    return score, label
+    if same_source and penalty <= 0.22 and changed_context <= 1:
+        return score, "A｜高可比：同來源且其他條件近似", "A"
+    if same_source and penalty <= 0.85 and changed_context <= 2:
+        return score, "B｜次佳：同來源但仍有其他變因差異", "B"
+    if (not same_source) and penalty <= 0.35 and changed_context <= 1:
+        return score, "B｜次佳：跨來源但其他條件較接近", "B"
+    return score, "C｜背景：僅能作相關案例參考", "C"
 
 
 def _base_relevance(question: str, item: dict[str, Any]) -> float:
@@ -132,8 +161,7 @@ def _base_relevance(question: str, item: dict[str, Any]) -> float:
     for field, aliases in FIELD_TERMS.items():
         if any(alias in q for alias in aliases):
             score += 1.5
-            value = item.get(field)
-            if value not in (None, "", "N/A"):
+            if _has_value(item, field):
                 score += 1.0
 
     for token in re.findall(r"[a-z0-9_.-]{3,}", q):
@@ -144,49 +172,86 @@ def _base_relevance(question: str, item: dict[str, Any]) -> float:
 
 
 def search_literature(question: str, literature_db: list[dict], limit: int = 5) -> list[dict]:
-    """Retrieve relevant evidence, prioritizing comparable cases for one-variable questions."""
+    """
+    Evidence hierarchy:
+      A: target outcome exists + target variable changes + other conditions nearly fixed.
+      B: outcome exists + useful comparison, but confounders remain.
+      C: relevant background only; not primary causal evidence.
+    """
     target = detect_target_variable(question)
+    outcome = detect_outcome_variable(question)
 
-    if target is not None and len(literature_db) >= 2:
+    usable = [item for item in literature_db if _has_value(item, outcome)]
+    background = [item for item in literature_db if item not in usable]
+
+    if target is not None and outcome is not None and len(usable) >= 2:
         pair_rows = []
-        for i, a in enumerate(literature_db):
-            for j in range(i + 1, len(literature_db)):
-                b = literature_db[j]
-                pair_score, label = _pair_comparability(a, b, target)
+        for i, a in enumerate(usable):
+            for j in range(i + 1, len(usable)):
+                b = usable[j]
+                pair_score, label, tier = _pair_comparability(a, b, target)
                 relevance = (_base_relevance(question, a) + _base_relevance(question, b)) / 2
-                total = pair_score + relevance
-                pair_rows.append((total, label, a, b))
+                tier_bonus = {"A": 12.0, "B": 6.0, "C": 0.0}[tier]
+                total = pair_score + relevance + tier_bonus
+                pair_rows.append((total, tier, label, a, b))
 
-        pair_rows.sort(key=lambda x: x[0], reverse=True)
+        pair_rows.sort(key=lambda x: ({"A": 0, "B": 1, "C": 2}[x[1]], -x[0]))
 
         selected = []
         seen = set()
-        for _, label, a, b in pair_rows:
-            for item in (a, b):
-                key = (str(item.get("source", "")), str(item.get("case", "")))
-                if key in seen:
-                    continue
-                enriched = dict(item)
-                enriched["_comparability"] = label
-                enriched["_target_variable"] = target
-                selected.append(enriched)
-                seen.add(key)
-                if len(selected) >= limit:
-                    return selected
 
+        # Primary evidence: A then B. C is added only if space remains.
+        for wanted_tier in ("A", "B", "C"):
+            for _, tier, label, a, b in pair_rows:
+                if tier != wanted_tier:
+                    continue
+                for item in (a, b):
+                    key = (str(item.get("source", "")), str(item.get("case", "")))
+                    if key in seen:
+                        continue
+                    enriched = dict(item)
+                    enriched["_comparability"] = label
+                    enriched["_evidence_tier"] = tier
+                    enriched["_target_variable"] = target
+                    enriched["_outcome_variable"] = outcome
+                    selected.append(enriched)
+                    seen.add(key)
+                    if len(selected) >= limit:
+                        return selected
+
+        if selected:
+            return selected
+
+    # Fallback for descriptive questions or when no pair can be formed.
     scored = []
-    for idx, item in enumerate(literature_db):
+    for idx, item in enumerate(usable):
         score = _base_relevance(question, item)
         enriched = dict(item)
-        enriched["_comparability"] = "一般相關案例"
+        enriched["_comparability"] = (
+            "B｜有目標輸出值，但缺乏單一變因對照"
+            if outcome is not None
+            else "一般相關案例"
+        )
+        enriched["_evidence_tier"] = "B" if outcome is not None else "C"
         enriched["_target_variable"] = target
+        enriched["_outcome_variable"] = outcome
         scored.append((score, idx, enriched))
 
     scored.sort(key=lambda x: (-x[0], x[1]))
-    positive = [item for score, _, item in scored if score > 0]
-    if positive:
-        return positive[:limit]
-    return [item for _, _, item in scored[:limit]]
+    selected = [item for score, _, item in scored if score > 0][:limit]
+
+    # If no usable evidence exists, show only background records and mark them unusable.
+    if not selected and background:
+        for item in background[:limit]:
+            enriched = dict(item)
+            label = OUTCOME_LABELS.get(outcome, outcome or "目標輸出")
+            enriched["_comparability"] = f"C｜背景：缺少{label}實測值"
+            enriched["_evidence_tier"] = "C"
+            enriched["_target_variable"] = target
+            enriched["_outcome_variable"] = outcome
+            selected.append(enriched)
+
+    return selected
 
 
 def evidence_dataframe(items: list[dict]) -> pd.DataFrame:
@@ -194,6 +259,7 @@ def evidence_dataframe(items: list[dict]) -> pd.DataFrame:
     for i, item in enumerate(items, start=1):
         rows.append({
             "證據": f"[{i}]",
+            "證據層級": item.get("_evidence_tier", "C"),
             "可比較性": item.get("_comparability", "一般相關案例"),
             "來源": item.get("source", ""),
             "案例": item.get("case", ""),
@@ -216,7 +282,7 @@ def _evidence_text(items: list[dict]) -> str:
     for i, item in enumerate(items, start=1):
         blocks.append(
             "\n".join([
-                f"[{i}] comparability={item.get('_comparability', '一般相關案例')}",
+                f"[{i}] tier={item.get('_evidence_tier', 'C')}; comparability={item.get('_comparability', '一般相關案例')}",
                 f"source={item.get('source', '')}; case={item.get('case', '')}",
                 (
                     "gas(sccm): "
@@ -248,18 +314,20 @@ def generate_ai_answer(
 
     client = genai.Client(api_key=api_key)
     target = detect_target_variable(question)
+    outcome = detect_outcome_variable(question)
 
     instructions = """你是半導體乾式蝕刻研究助理。請只根據提供的 evidence 回答，不得補造文獻數據或最佳 recipe。
 
 規則：
 1. 回答使用繁體中文。
-2. 每一個重要結論句只在句尾引用一次 [1]、[2] 等證據編號，不要在句首和句尾重複 citation。
-3. 先判斷 evidence 的「可比較性」。高可比資料可以用來討論較可信的趨勢；低可比資料只能當背景參考。
-4. 如果使用者問的是某個變因增加/降低造成的影響，只有在其他條件近似時，才可以說「可能呈現某趨勢」；否則要明確說無法分離該變因本身的效果。
-5. 不同文獻機台、樣品、功率或壓力不同時，要提醒不能直接當作單一 DOE 的因果結論。
-6. 如果證據不足，直接說資料不足，並指出還缺什麼對照資料。
-7. 可以提出「下一步值得驗證的變因」，但不要給出宣稱最佳的製程參數。
-8. 結尾用一小段「資料限制」說明目前回答的可靠範圍。
+2. 每一個重要結論句只在句尾引用一次 [1]、[2] 等證據編號。
+3. 證據層級 A = 最佳對照；B = 可參考但仍有混雜變因；C = 只能作背景。
+4. 如果使用者問某個變因增加/降低對某個輸出的影響，只有 A 或 B 證據且該輸出有實測值時，才可以討論可能趨勢。
+5. C 級資料不能拿來支持因果或方向性結論。
+6. 如果沒有 A/B 證據，直接說目前資料庫不足以回答該變因的獨立影響，不要勉強推論。
+7. 若其他條件同時改變，要明確指出混雜變因，不能把結果單獨歸因於目標變因。
+8. 可以提出下一步值得做的單一變因對照實驗，但不要宣稱最佳 recipe。
+9. 結尾用「資料限制」簡短說明目前證據能支持到什麼程度。
 """
 
     target_note = (
@@ -267,16 +335,22 @@ def generate_ai_answer(
         if target is not None
         else "本題沒有辨識到單一主要變因。"
     )
+    outcome_note = (
+        f"本題辨識的觀察輸出：{OUTCOME_LABELS.get(outcome, outcome)}。"
+        if outcome is not None
+        else "本題沒有辨識到單一觀察輸出。"
+    )
 
     prompt = f"""使用者問題：
 {question}
 
 {target_note}
+{outcome_note}
 
 目前從本地 TiN 蝕刻資料庫檢索到的 evidence：
 {_evidence_text(evidence)}
 
-請先區分「可以比較」與「僅相關」的資料，再整理回答。"""
+請依 A/B/C 證據層級回答。若沒有足夠的 A/B 證據，直接說無法由現有資料判斷獨立影響。"""
 
     response = client.models.generate_content(
         model=model,
