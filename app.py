@@ -403,9 +403,11 @@ with ai_tab:
             try:
                 api_key = st.secrets.get("GEMINI_API_KEY", "")
                 model_name = st.secrets.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+                fallback_model_name = st.secrets.get("GEMINI_FALLBACK_MODEL", "gemini-3.8-flash")
             except Exception:
                 api_key = ""
                 model_name = "gemini-3.5-flash-lite"
+                fallback_model_name = "gemini-3.8-flash"
 
             st.markdown("### 3. AI 研究整理")
             if not api_key:
@@ -418,13 +420,21 @@ with ai_tab:
                             evidence=evidence,
                             api_key=api_key,
                             model=model_name,
+                            fallback_model=fallback_model_name,
                         )
                     st.markdown('<div class="ai-result">', unsafe_allow_html=True)
                     st.markdown(answer)
                     st.markdown('</div>', unsafe_allow_html=True)
                 except Exception as exc:
-                    st.error(f"AI 整理失敗：{exc}")
-                    st.caption("文獻檢索結果仍可使用；請檢查 API Key、模型名稱或服務狀態。")
+                    if "AI_SERVICE_BUSY" in str(exc):
+                        st.warning(
+                            "AI 服務目前較忙碌，系統已保留本次文獻檢索結果。"
+                            "請稍後再按一次「開始分析」。"
+                        )
+                        st.caption("系統已自動重試並嘗試備援模型。")
+                    else:
+                        st.error("AI 整理暫時無法完成。文獻檢索結果仍可正常使用。")
+                        st.caption("請稍後重試；若持續發生，再檢查 API Key 或模型設定。")
 
     with st.expander("分析原則與目前限制"):
         st.markdown(
