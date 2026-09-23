@@ -72,7 +72,6 @@ st.markdown(
       .tier-card {border:1px solid #e6e0d8; background:#fff; border-radius:10px; padding:12px 14px;}
       .tier-card strong {font-size:1.2rem;}
       .tier-note {font-size:.82rem; color:#6b7280; margin-top:.2rem;}
-      .ai-result {border:1px solid #e6e0d8; background:#fff; border-radius:12px; padding:18px 20px; margin-top:.6rem;}
       div[data-testid="stDataFrame"] {border:1px solid #e6e0d8; border-radius:10px; overflow:hidden;}
       div[data-testid="stMetric"] [data-testid="stMetricValue"] {font-size:1.8rem;}
       @media (max-width: 768px) {
@@ -417,9 +416,7 @@ with ai_tab:
                             model=model_name,
                             fallback_model=fallback_model_name,
                         )
-                    st.markdown('<div class="ai-result">', unsafe_allow_html=True)
                     st.markdown(answer)
-                    st.markdown('</div>', unsafe_allow_html=True)
                 except Exception as exc:
                     if "AI_SERVICE_BUSY" in str(exc):
                         st.warning(
