@@ -353,14 +353,9 @@ with ai_tab:
         label_visibility="collapsed",
     )
 
-    c1, c2 = st.columns([1, 2.2])
-    evidence_limit = c1.selectbox(
-        "證據筆數",
-        [3, 5, 8],
-        index=1,
-        help="只控制顯示與送入 AI 的證據數量，不代表資料越多越可信。",
-    )
-    run_ai = c2.button("開始分析", type="primary", use_container_width=True)
+    evidence_limit = 5
+    st.caption("系統會自動挑選最多 5 筆最相關的證據，優先保留可比較性較高的案例。")
+    run_ai = st.button("開始分析", type="primary", use_container_width=True)
 
     if run_ai:
         if not question.strip():
