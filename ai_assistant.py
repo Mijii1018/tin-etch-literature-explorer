@@ -2,7 +2,8 @@ import re
 from typing import Any
 
 import pandas as pd
-from openai import OpenAI
+from google import genai
+from google.genai import types
 
 
 FIELD_TERMS = {
@@ -135,12 +136,12 @@ def generate_ai_answer(
     question: str,
     evidence: list[dict],
     api_key: str,
-    model: str = "gpt-5.6-luna",
+    model: str = "gemini-3.5-flash-lite",
 ) -> str:
     if not evidence:
         return "目前資料庫沒有找到可用的文獻案例，因此不產生製程結論。"
 
-    client = OpenAI(api_key=api_key)
+    client = genai.Client(api_key=api_key)
     instructions = """你是半導體乾式蝕刻研究助理。請只根據提供的 evidence 回答，不得補造文獻數據或最佳 recipe。
 
 規則：
@@ -159,9 +160,12 @@ def generate_ai_answer(
 
 請依規則整理回答。"""
 
-    response = client.responses.create(
+    response = client.models.generate_content(
         model=model,
-        instructions=instructions,
-        input=prompt,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=instructions,
+            temperature=0.2,
+        ),
     )
-    return response.output_text
+    return response.text or "模型沒有回傳文字內容。"
