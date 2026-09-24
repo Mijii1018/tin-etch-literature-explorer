@@ -6,6 +6,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from config import LITERATURE_DB_PATH
+from ai_assistant import analyze_question_support, detect_question_type, evidence_dataframe, generate_ai_answer, search_literature
 from db_loader import DBValidationError, load_literature_db
 from literature import build_presets_from_db, closest_literature_case, exact_literature_match
 from plotter import draw_profile
@@ -65,6 +66,13 @@ st.markdown(
       .reference-card {border:1px solid #e6e0d8; padding:.75rem .85rem; border-radius:8px; background:#faf7f2; margin:.35rem 0 .8rem 0; line-height:1.45;}
       .reference-title {font-size:.82rem; color:#4b5563; margin-top:.2rem;}
       .quick-note {padding:.65rem .85rem; border:1px solid #e6e0d8; border-radius:8px; background:#fff;}
+      .ai-hero {border:1px solid #e6e0d8; background:#ffffff; border-radius:12px; padding:18px 20px; margin:.4rem 0 1rem 0;}
+      .ai-hero-title {font-size:1.05rem; font-weight:700; margin-bottom:.35rem;}
+      .ai-hero-sub {font-size:.92rem; color:#5b6472; line-height:1.6;}
+      .tier-card {border:1px solid #e6e0d8; background:#fff; border-radius:10px; padding:12px 14px;}
+      .tier-card strong {font-size:1.2rem;}
+      .tier-note {font-size:.82rem; color:#6b7280; margin-top:.2rem;}
+      div[data-testid="stDataFrame"] {border:1px solid #e6e0d8; border-radius:10px; overflow:hidden;}
       div[data-testid="stMetric"] [data-testid="stMetricValue"] {font-size:1.8rem;}
       @media (max-width: 768px) {
         .block-container {padding-top: 1rem; padding-left: .9rem; padding-right: .9rem; padding-bottom: 2rem;}
@@ -251,8 +259,8 @@ closest_case, closest_dist = closest_literature_case(LITERATURE_DB, BCl3, Cl2, A
 # -----------------------------
 # Tabs
 # -----------------------------
-overview_tab, literature_tab, validation_tab, about_tab = st.tabs(
-    ["操作與結果", "文獻資料", "目前模型差多少", "這個工具怎麼開始的"]
+overview_tab, ai_tab, literature_tab, validation_tab, about_tab = st.tabs(
+    ["操作與結果", "AI 文獻助理", "文獻資料", "目前模型差多少", "這個工具怎麼開始的"]
 )
 
 with overview_tab:
@@ -320,6 +328,134 @@ with overview_tab:
         c3.metric("估算底部線寬", f"{cd_bottom_um:.2f} µm")
         st.write(f"估算 TiN 蝕刻深度：**{etched_depth_nm:.1f} nm**")
         st.write(f"估算光阻損耗：**{pr_loss_nm:.1f} nm**")
+
+with ai_tab:
+    st.markdown(
+        """
+        <div class="ai-hero">
+          <div class="ai-hero-title">AI 文獻助理</div>
+          <div class="ai-hero-sub">
+            先從目前整理的 TiN 蝕刻資料庫找出可比較證據，再由生成式 AI 協助整理。
+            系統會區分證據層級，資料不足時不強行下結論，也不直接產生最佳 recipe。
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### 1. 提出研究問題")
+    question = st.text_area(
+        "製程問題",
+        height=105,
+        placeholder="例如：Ar 增加對 TiN 側壁角度有什麼影響？",
+        key="ai_question",
+        label_visibility="collapsed",
+    )
+
+    evidence_limit = 5
+    st.caption("系統會自動挑選最多 5 筆最相關的證據，優先保留可比較性較高的案例。")
+    run_ai = st.button("開始分析", type="primary", use_container_width=True)
+
+    if run_ai:
+        if not question.strip():
+            st.warning("請先輸入一個研究問題。")
+        else:
+            evidence = search_literature(question, LITERATURE_DB, limit=evidence_limit)
+            support = analyze_question_support(question)
+
+            question_type = detect_question_type(question)
+            st.markdown("### 2. 證據篩選")
+            if question_type == "lookup":
+                st.info("這是一個資料查詢型問題，系統會直接依目標欄位排序，不進行 A/B/C 因果分級。")
+            else:
+                if not support["supported"]:
+                    st.warning("目前沒有足以直接回答此問題的資料欄位。")
+                    st.caption(support["message"])
+
+                tier_counts = {"A": 0, "B": 0, "C": 0}
+                for item in evidence:
+                    tier = item.get("_evidence_tier", "C")
+                    if tier in tier_counts:
+                        tier_counts[tier] += 1
+
+                t1, t2, t3 = st.columns(3)
+                t1.markdown(
+                    f'<div class="tier-card"><strong>A　{tier_counts["A"]}</strong><div class="tier-note">高可比｜接近單一變因對照</div></div>',
+                    unsafe_allow_html=True,
+                )
+                t2.markdown(
+                    f'<div class="tier-card"><strong>B　{tier_counts["B"]}</strong><div class="tier-note">可參考｜仍有來源或條件差異</div></div>',
+                    unsafe_allow_html=True,
+                )
+                t3.markdown(
+                    f'<div class="tier-card"><strong>C　{tier_counts["C"]}</strong><div class="tier-note">背景資料｜不支持因果結論</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("#### 本次檢索到的文獻證據")
+            st.dataframe(
+                evidence_dataframe(evidence),
+                use_container_width=True,
+                hide_index=True,
+            )
+            if question_type == "lookup":
+                st.caption("此表依問題指定的目標欄位排序；數值最高或最低僅代表目前資料庫中的紀錄。")
+            else:
+                st.caption(
+                    "A/B/C 是系統對『這個問題能不能用這些資料回答』的可比較性分級，"
+                    "不是對論文本身品質的評分。不同研究的機台、樣品與條件仍可能不同。"
+                )
+
+            try:
+                api_key = st.secrets.get("GEMINI_API_KEY", "")
+                model_name = st.secrets.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+                fallback_model_name = st.secrets.get("GEMINI_FALLBACK_MODEL", "gemini-3.8-flash")
+            except Exception:
+                api_key = ""
+                model_name = "gemini-3.5-flash-lite"
+                fallback_model_name = "gemini-3.8-flash"
+
+            st.markdown("### 3. AI 研究整理")
+            if not api_key:
+                st.info("文獻檢索可以正常使用，但目前尚未設定 Gemini API Key，因此生成式整理暫時關閉。")
+            else:
+                try:
+                    with st.spinner("正在依證據層級整理回答……"):
+                        answer = generate_ai_answer(
+                            question=question,
+                            evidence=evidence,
+                            api_key=api_key,
+                            model=model_name,
+                            fallback_model=fallback_model_name,
+                        )
+                    st.markdown(answer)
+                except Exception as exc:
+                    if "AI_SERVICE_BUSY" in str(exc):
+                        st.warning(
+                            "AI 服務目前較忙碌，系統已保留本次文獻檢索結果。"
+                            "請稍後再按一次「開始分析」。"
+                        )
+                        st.caption("系統已自動重試並嘗試備援模型。")
+                    else:
+                        st.error("AI 整理暫時無法完成。文獻檢索結果仍可正常使用。")
+                        st.caption("請稍後重試；若持續發生，再檢查 API Key 或模型設定。")
+
+    with st.expander("分析原則與目前限制"):
+        st.markdown(
+            """
+            **證據層級**
+            - **A｜高可比：** 目標輸出有實測值，目標變因有改變，其他條件盡量固定。
+            - **B｜可參考：** 目標輸出完整，但仍存在來源或其他製程條件差異。
+            - **C｜背景資料：** 只能協助理解脈絡，不拿來支持因果或方向性結論。
+
+            **目前範圍**
+            - 只使用本地整理的 TiN 蝕刻文獻資料。
+            - 不自動搜尋網路、不自動下載論文。
+            - 不直接產生最佳製程 recipe。
+            - 資料不足時，優先說明缺口，而不是勉強生成結論。
+            """
+        )
+
 
 with literature_tab:
     st.subheader("參考文獻對照")
