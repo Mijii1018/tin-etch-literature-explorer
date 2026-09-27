@@ -372,7 +372,7 @@ with literature_tab:
 with validation_tab:
     st.subheader("目前模型差多少")
     st.write("我用留一法交叉驗證（LOOCV）做一個簡單的自我檢查：每次先拿掉一筆文獻，再用剩下的資料去估它，看看結果會差多少。現在資料量還不大，所以這頁主要是讓我知道哪些輸出還不能太相信，不是拿來證明模型已經可以做正式製程預測。")
-    render_validation_section(LITERATURE_DB)
+    render_validation_section(LITERATURE_DB, LAB_SIDEWALL_DB)
 
 with about_tab:
     st.subheader("這個工具怎麼開始的")
