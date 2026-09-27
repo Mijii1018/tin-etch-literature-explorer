@@ -253,6 +253,64 @@ def _validate_and_normalize(df: pd.DataFrame) -> list[dict]:
     return records
 
 
+
+def load_sidewall_angle_cases(path: str = "lab_sidewall_cases.csv") -> list[dict]:
+    """
+    Load supplementary lab-measured sidewall-angle cases.
+
+    These records are intentionally kept separate from literature_db.xlsx because
+    the lab matrix does not yet have verified pressure / etch-rate / selectivity
+    values for every case. They participate only in sidewall-angle interpolation;
+    they must not be treated as complete literature presets or rate/selectivity data.
+    """
+    try:
+        df = pd.read_csv(path)
+    except FileNotFoundError as exc:
+        raise DBValidationError(f"找不到側壁實測資料：{path}") from exc
+
+    required = ["source", "case", "chemistry", "BCl3", "Cl2", "Ar", "N2", "angle"]
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        raise DBValidationError(
+            "lab_sidewall_cases.csv 缺少必要欄位：" + ", ".join(missing)
+        )
+
+    records: list[dict] = []
+    for row_idx, row in df.iterrows():
+        rec = {}
+        for col in df.columns:
+            value = row[col]
+            if pd.isna(value):
+                rec[col] = None
+            elif col in {"BCl3", "Cl2", "Ar", "N2", "angle", "source_power", "bias", "etch_time_s"}:
+                rec[col] = float(value)
+            else:
+                rec[col] = str(value).strip()
+
+        if not 0 <= rec["angle"] <= 90:
+            raise DBValidationError(
+                f"lab_sidewall_cases.csv 第 {row_idx + 2} 列 angle={rec['angle']} 超出 0–90°。"
+            )
+        if sum(rec[g] for g in ("BCl3", "Cl2", "Ar", "N2")) <= 0:
+            raise DBValidationError(
+                f"lab_sidewall_cases.csv 第 {row_idx + 2} 列氣體總和為 0。"
+            )
+
+        # Keep the keys used by database_predict_value() compatible with the
+        # literature records. Missing process outputs stay None by design.
+        rec.setdefault("Total_sccm", rec["BCl3"] + rec["Cl2"] + rec["Ar"] + rec["N2"])
+        rec.setdefault("pressure", None)
+        rec.setdefault("etch_rate_nm_min", None)
+        rec.setdefault("selectivity", None)
+        rec.setdefault("selectivity_target", None)
+        rec.setdefault("top_width_um", None)
+        rec.setdefault("tin_thick_A", 1000.0)
+        rec.setdefault("pr_thick_A", None)
+        rec.setdefault("intentional_overetch", False)
+        records.append(rec)
+
+    return records
+
 def load_literature_db(path: str = "literature_db.xlsx", sheet_name: str = "literature_db") -> list[dict]:
     """
     讀取 literature_db.xlsx 並回傳 list[dict]，型別與內容通過 schema 驗證。
