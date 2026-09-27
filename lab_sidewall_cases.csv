@@ -1,0 +1,6 @@
+source,case,chemistry,BCl3,Cl2,Ar,N2,angle,position,source_power,bias,etch_time_s,note
+CYCU TiN CPW lab study,A,Cl2/Ar/N2,0,70,30,0,66.5,Center,800,100,7,"Poster Case A = thesis Case B; SEM c-max; lab measured"
+CYCU TiN CPW lab study,B,Cl2/Ar/N2,0,40,60,0,82.1,Center,800,100,10,"Poster Case B = thesis Case C; SEM c-max; lab measured"
+CYCU TiN CPW lab study,C,Cl2/Ar/N2,0,30,70,0,73.5,Center,800,100,11,"Poster Case C = thesis Case D; SEM c-max; lab measured"
+CYCU TiN CPW lab study,D,Cl2/Ar/N2,0,20,70,10,82.5,Center,800,100,19,"Poster Case D = thesis Case E; SEM c-max; lab measured"
+CYCU TiN CPW lab study,E,Cl2/Ar/N2,0,15,70,15,56.5,Center,800,100,20,"Poster Case E = thesis Case F; SEM c-max; lab measured"
