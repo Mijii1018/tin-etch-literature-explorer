@@ -282,7 +282,7 @@ def load_sidewall_angle_cases(path: str = "lab_sidewall_cases.csv") -> list[dict
             value = row[col]
             if pd.isna(value):
                 rec[col] = None
-            elif col in {"BCl3", "Cl2", "Ar", "N2", "angle", "source_power", "bias", "etch_time_s"}:
+            elif col in {"BCl3", "Cl2", "Ar", "N2", "angle", "pressure", "source_power", "bias", "etch_time_s"}:
                 rec[col] = float(value)
             else:
                 rec[col] = str(value).strip()
