@@ -254,6 +254,55 @@ def _validate_and_normalize(df: pd.DataFrame) -> list[dict]:
 
 
 
+
+def load_sem_measurements(path: str = "sem_measurements.csv") -> list[dict]:
+    """Load raw SEM measurements.
+
+    One row is one measured sidewall. LL/LS/SL/SS are measurement IDs only;
+    they are deliberately not model features. D0403 is Edge and D1009 is Center,
+    already normalized into the region column.
+    """
+    try:
+        df = pd.read_csv(path)
+    except FileNotFoundError as exc:
+        raise DBValidationError(f"找不到 SEM 原始量測資料：{path}") from exc
+
+    required = ["case", "Cl2", "Ar", "N2", "etch_time_s", "region",
+                "sidewall_id", "angle_deg", "filename"]
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        raise DBValidationError(
+            "sem_measurements.csv 缺少必要欄位：" + ", ".join(missing)
+        )
+
+    records = []
+    for row_idx, row in df.iterrows():
+        rec = {}
+        for col in df.columns:
+            value = row[col]
+            if pd.isna(value):
+                rec[col] = None
+            elif col in {"Cl2", "Ar", "N2", "etch_time_s", "angle_deg",
+                         "secondary_angle_deg"}:
+                rec[col] = float(value)
+            else:
+                rec[col] = str(value).strip()
+
+        if rec["region"] not in {"Center", "Edge"}:
+            raise DBValidationError(
+                f"sem_measurements.csv 第 {row_idx + 2} 列 region 必須是 Center 或 Edge。"
+            )
+        if rec["sidewall_id"] not in {"LL", "LS", "SL", "SS"}:
+            raise DBValidationError(
+                f"sem_measurements.csv 第 {row_idx + 2} 列 sidewall_id 不合法。"
+            )
+        if not 0 <= rec["angle_deg"] <= 90:
+            raise DBValidationError(
+                f"sem_measurements.csv 第 {row_idx + 2} 列 angle_deg 超出 0–90°。"
+            )
+        records.append(rec)
+    return records
+
 def load_sidewall_angle_cases(path: str = "lab_sidewall_cases.csv") -> list[dict]:
     """
     Load supplementary lab-measured sidewall-angle cases.
