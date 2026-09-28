@@ -1,0 +1,41 @@
+case,Cl2,Ar,N2,etch_time_s,region,sidewall_id,angle_deg,secondary_angle_deg,measurement_note,filename
+A,70,30,0,7,Edge,LL,57.35,,,D0403_DI_SW_LL-m(1).tif
+A,70,30,0,7,Edge,LS,36.35,,,D0403_DI_SW_LS-m.tif
+A,70,30,0,7,Edge,SL,66.14,,,D0403_DI_SW_SL-m.tif
+A,70,30,0,7,Edge,SS,47.26,,,D0403_DI_SW_SS-m.tif
+A,70,30,0,7,Center,LL,65.76,,,D1009_DI_SW_LL-m.tif
+A,70,30,0,7,Center,LS,66.56,,,D1009_DI_SW_LS-m.tif
+A,70,30,0,7,Center,SL,51.66,,,D1009_DI_SW_SL-m.tif
+A,70,30,0,7,Center,SS,60.83,,,D1009_DI_SW_SS-m.tif
+B,40,60,0,10,Edge,LL,63.8,,,D0403_DI_SW_LL-m(2).tif
+B,40,60,0,10,Edge,LS,72.6,,,D0403_DI_SW_LS-m(1).tif
+B,40,60,0,10,Edge,SL,73,,,D0403_DI_SW_SL-m(1).tif
+B,40,60,0,10,Edge,SS,73.6,,,D0403_DI_SW_SS-m(1).tif
+B,40,60,0,10,Center,LL,57.5,,,D1009_DI_SW_LL-m(1).tif
+B,40,60,0,10,Center,LS,61.5,,,D1009_DI_SW_LS-m(1).tif
+B,40,60,0,10,Center,SL,72.6,,,D1009_DI_SW_SL-m(1).tif
+B,40,60,0,10,Center,SS,82.1,,,D1009_DI_SW_SS-m(1).tif
+C,30,70,0,11,Edge,LL,57,,multiple angle annotations; secondary label not entered because not fully legible,D0403_DI_SW_LL-m(3).tif
+C,30,70,0,11,Edge,LS,55.4,,,D0403_DI_SW_LS-m(2).tif
+C,30,70,0,11,Edge,SL,67,,,D0403_DI_SW_SL-m(2).tif
+C,30,70,0,11,Edge,SS,63.7,,,D0403_DI_SW_SS-m(2).tif
+C,30,70,0,11,Center,LL,58.5,,,D1009_DI_SW_LL-m(2).tif
+C,30,70,0,11,Center,LS,63.7,,,D1009_DI_SW_LS-m(2).tif
+C,30,70,0,11,Center,SL,72.2,29.3,two-facet sidewall; 72.2 treated as main wall,D1009_DI_SW_SL-m(2).tif
+C,30,70,0,11,Center,SS,73.5,,,D1009_DI_SW_SS-m(2).tif
+D,20,70,10,19,Edge,LL,65,,,D0403_DI_SW_LL-m(4).tif
+D,20,70,10,19,Edge,LS,58.1,,,D0403_DI_SW_LS-m(3).tif
+D,20,70,10,19,Edge,SL,75.4,,,D0403_DI_SW_SL-m(3).tif
+D,20,70,10,19,Edge,SS,68.3,,,D0403_DI_SW_SS-m(3).tif
+D,20,70,10,19,Center,LL,68.5,,image note: vertical length may be slightly larger due to drift,D1009_DI_SW_LL-m(3).tif
+D,20,70,10,19,Center,LS,58,,,D1009_DI_SW_LS-m(3).tif
+D,20,70,10,19,Center,SL,62.8,,,D1009_DI_SW_SL-m(3).tif
+D,20,70,10,19,Center,SS,82.5,,,D1009_DI_SW_SS-m(3).tif
+E,15,70,15,20,Edge,LL,28.8,59,two-facet sidewall; shallow long facet treated as main wall,D0403_DI_SW_LL-m(5).tif
+E,15,70,15,20,Edge,LS,55.9,,,D0403_DI_SW_LS-m(4).tif
+E,15,70,15,20,Edge,SL,40.3,,,D0403_DI_SW_SL-m(4).tif
+E,15,70,15,20,Edge,SS,30.5,65.4,two-facet sidewall; shallow long facet treated as main wall,D0403_DI_SW_SS-m(4).tif
+E,15,70,15,20,Center,LL,45.7,,,D1009_DI_SW_LL-m(4).tif
+E,15,70,15,20,Center,LS,40,73,two-facet sidewall; shallow long facet treated as main wall,D1009_DI_SW_LS-m(4).tif
+E,15,70,15,20,Center,SL,48.1,,,D1009_DI_SW_SL-m(4).tif
+E,15,70,15,20,Center,SS,56.5,,,D1009_DI_SW_SS-m(4).tif
