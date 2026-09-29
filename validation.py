@@ -97,6 +97,43 @@ def loocv_angle(literature_db):
     return rows
 
 
+
+def loocv_lab_angle(literature_db, lab_sidewall_db):
+    """Lab A–E 專用 LOOCV。
+
+    每次拿掉一筆 lab case，使用「原始文獻 + 其餘四筆 lab case」預測被拿掉
+    的 case，避免同氣體比例直接把自己的實測角度讀回來。
+
+    注意：lab cases 沒有可靠的 TiN:PR selectivity 實測值，因此 selectivity
+    仍由原始 literature_db 估算；不把缺失的 selectivity 人工補值。
+    """
+    rows = []
+    for i, held_out in enumerate(lab_sidewall_db):
+        lab_subset = lab_sidewall_db[:i] + lab_sidewall_db[i + 1:]
+        angle_db = literature_db + lab_subset
+
+        selectivity = database_predict_value(
+            literature_db,
+            held_out["BCl3"], held_out["Cl2"], held_out["Ar"], held_out["N2"],
+            "selectivity", required_target_material="PR",
+        )
+
+        angle, base_angle, lo, hi = calc_sidewall_angle(
+            angle_db, None,
+            held_out["BCl3"], held_out["Cl2"], held_out["Ar"], held_out["N2"],
+            pressure=held_out["pressure"], bias_power=held_out["bias"],
+            icp_power=held_out["source_power"],
+            selectivity=selectivity, is_manual_selectivity=False,
+        )
+        actual = held_out["angle"]
+        err = angle - actual
+        rows.append({
+            "source": held_out["source"], "case": held_out["case"],
+            "actual": actual, "pred": angle, "base_idw": base_angle,
+            "band_lo": lo, "band_hi": hi, "err": err,
+        })
+    return rows
+
 def _summarize(rows, err_key="err", pct_key=None):
     errs = np.array([r[err_key] for r in rows], dtype=float)
     out = {
@@ -124,7 +161,7 @@ def _rows_to_display_df(rows, columns, formatters):
     return df
 
 
-def render_validation_section(literature_db):
+def render_validation_section(literature_db, lab_sidewall_db=None, sem_measurements=None):
     """
     在頁面上渲染一個「模型驗證（LOOCV）」的可折疊區塊。
 
@@ -153,6 +190,8 @@ def render_validation_section(literature_db):
         rate_summary = _summarize(rate_rows, pct_key="pct")
         sel_summary = _summarize(sel_rows, pct_key="pct")
         angle_summary = _summarize(angle_rows) if angle_rows else None
+        lab_angle_rows = loocv_lab_angle(literature_db, lab_sidewall_db) if lab_sidewall_db else []
+        lab_angle_summary = _summarize(lab_angle_rows) if lab_angle_rows else None
 
         st.markdown("**先看目前大概會差多少**")
         col1, col2, col3 = st.columns(3)
@@ -223,6 +262,63 @@ def render_validation_section(literature_db):
                 },
             )
             render_html_table(angle_df.style.hide(axis="index"))
+
+        if sem_measurements:
+            st.markdown("---")
+            st.markdown("**A–E 原始 SEM 四側壁分布**")
+            glass_alert(
+                "info",
+                "D1009 = Center、D0403 = Edge；LL / LS / SL / SS 只是四個側壁的量測編號，不作為模型特徵。"
+                "每個 Case × Region 的模型比較值仍沿用原研究方法，取四個側壁中的最大角度。"
+            )
+            sem_df = pd.DataFrame(sem_measurements)
+            summary = (
+                sem_df.groupby(["case", "region"], sort=False)["angle_deg"]
+                .agg(["min", "mean", "max", "std"])
+                .reset_index()
+                .rename(columns={
+                    "case": "Case", "region": "區域", "min": "Min",
+                    "mean": "Mean", "max": "Max（模型 target）", "std": "Std",
+                })
+            )
+            for col in ["Min", "Mean", "Max（模型 target）", "Std"]:
+                summary[col] = summary[col].map(lambda v: f"{v:.1f}°")
+            render_html_table(summary.style.hide(axis="index"))
+
+            with st.expander("看 40 筆 SEM 原始角度", expanded=False):
+                raw = sem_df[["case", "region", "sidewall_id", "angle_deg",
+                              "secondary_angle_deg", "measurement_note"]].copy()
+                raw.columns = ["Case", "區域", "側壁編號", "主要角度", "局部 facet 角", "備註"]
+                raw["主要角度"] = raw["主要角度"].map(lambda v: f"{v:.2f}°")
+                raw["局部 facet 角"] = raw["局部 facet 角"].map(
+                    lambda v: "—" if pd.isna(v) else f"{float(v):.1f}°"
+                )
+                raw["備註"] = raw["備註"].fillna("").replace("", "—")
+                render_html_table(raw.style.hide(axis="index"))
+
+        if lab_angle_rows:
+            st.markdown("---")
+            st.markdown("**實驗室 A–E 側壁角度｜真正留一法驗證（°）**")
+            glass_alert(
+                "info",
+                "這一表每次都先拿掉正在驗證的 A–E case，再用原始文獻與其餘四筆實驗資料預測，"
+                "因此不會因為資料庫裡已經存在相同 recipe 而直接讀回實測角度。"
+                f"目前五組的 LOOCV MAE = {lab_angle_summary['mae']:.1f}°，"
+                f"RMSE = {lab_angle_summary['rmse']:.1f}°。"
+            )
+            lab_angle_df = _rows_to_display_df(
+                lab_angle_rows,
+                columns={"case": "Case", "actual": "SEM 實測 c-max",
+                         "pred": "留一法預測", "base_idw": "IDW 基準",
+                         "err": "角度誤差（°）"},
+                formatters={
+                    "actual": lambda v: f"{v:.1f}",
+                    "pred": lambda v: f"{v:.1f}",
+                    "base_idw": lambda v: f"{v:.1f}",
+                    "err": lambda v: f"{v:+.1f}",
+                },
+            )
+            render_html_table(lab_angle_df.style.hide(axis="index"))
 
         st.caption(
             "MAE 是平均絕對誤差；RMSE 對少數很大的誤差會更敏感；"
