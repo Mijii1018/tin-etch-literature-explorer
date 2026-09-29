@@ -7,3 +7,6 @@ OUTPUT_DIR = PROJECT_ROOT / "output"
 ASSET_DIR = PROJECT_ROOT / "assets"
 
 LITERATURE_DB_PATH = PROJECT_ROOT / "literature_db.xlsx"
+
+SIDEWALL_CASES_PATH = PROJECT_ROOT / "lab_sidewall_cases.csv"
+SEM_MEASUREMENTS_PATH = PROJECT_ROOT / "sem_measurements.csv"
