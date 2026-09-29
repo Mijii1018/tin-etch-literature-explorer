@@ -103,10 +103,28 @@ except (DBValidationError, FileNotFoundError) as exc:
 ANGLE_DB = LITERATURE_DB + LAB_SIDEWALL_DB
 
 PRESETS = build_presets_from_db(LITERATURE_DB)
-PRESET_LABELS = list(PRESETS.keys())
-PRESET_META = {PRESET_LABELS[0]: None}
-for label, item in zip(PRESET_LABELS[1:], LITERATURE_DB):
+PRESET_META = {next(iter(PRESETS)): None}
+for label, item in zip(list(PRESETS.keys())[1:], LITERATURE_DB):
     PRESET_META[label] = item
+
+# 專題實驗室 A–E 也做成 sidebar 可直接套用的 preset。
+# 只帶入已確認的製程條件；沒有實測 selectivity / 膜厚的欄位不虛構。
+for item in LAB_SIDEWALL_DB:
+    case = str(item["case"])
+    label = f"LAB {case} — Cl₂/Ar/N₂ {item['Cl2']:g}/{item['Ar']:g}/{item['N2']:g} · c-max {item['angle']:.1f}°"
+    PRESETS[label] = {
+        "BCl3": 0,
+        "Cl2": int(round(item["Cl2"])),
+        "Ar": int(round(item["Ar"])),
+        "N2": int(round(item["N2"])),
+        "pressure": float(item["pressure"]),
+        "bias": int(round(item["bias"])),
+        "icp": int(round(item["source_power"])),
+        "etch_time_slider": int(round(item["etch_time_s"])),
+    }
+    PRESET_META[label] = item
+
+PRESET_LABELS = list(PRESETS.keys())
 
 DEFAULTS = {
     "BCl3": 0,
@@ -137,6 +155,8 @@ def preset_display_label(label: str) -> str:
     item = PRESET_META.get(label)
     if item is None:
         return "手動輸入"
+    if str(item.get("source", "")).startswith("CYCU_TiN_CPW_Lab"):
+        return label
     ref = reference_for_source(item.get("source"))
     if ref is None:
         return label
