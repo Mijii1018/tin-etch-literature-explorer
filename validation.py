@@ -161,7 +161,7 @@ def _rows_to_display_df(rows, columns, formatters):
     return df
 
 
-def render_validation_section(literature_db, lab_sidewall_db=None):
+def render_validation_section(literature_db, lab_sidewall_db=None, sem_measurements=None):
     """
     在頁面上渲染一個「模型驗證（LOOCV）」的可折疊區塊。
 
@@ -262,6 +262,39 @@ def render_validation_section(literature_db, lab_sidewall_db=None):
                 },
             )
             render_html_table(angle_df.style.hide(axis="index"))
+
+        if sem_measurements:
+            st.markdown("---")
+            st.markdown("**A–E 原始 SEM 四側壁分布**")
+            glass_alert(
+                "info",
+                "D1009 = Center、D0403 = Edge；LL / LS / SL / SS 只是四個側壁的量測編號，不作為模型特徵。"
+                "每個 Case × Region 的模型比較值仍沿用原研究方法，取四個側壁中的最大角度。"
+            )
+            sem_df = pd.DataFrame(sem_measurements)
+            summary = (
+                sem_df.groupby(["case", "region"], sort=False)["angle_deg"]
+                .agg(["min", "mean", "max", "std"])
+                .reset_index()
+                .rename(columns={
+                    "case": "Case", "region": "區域", "min": "Min",
+                    "mean": "Mean", "max": "Max（模型 target）", "std": "Std",
+                })
+            )
+            for col in ["Min", "Mean", "Max（模型 target）", "Std"]:
+                summary[col] = summary[col].map(lambda v: f"{v:.1f}°")
+            render_html_table(summary.style.hide(axis="index"))
+
+            with st.expander("看 40 筆 SEM 原始角度", expanded=False):
+                raw = sem_df[["case", "region", "sidewall_id", "angle_deg",
+                              "secondary_angle_deg", "measurement_note"]].copy()
+                raw.columns = ["Case", "區域", "側壁編號", "主要角度", "局部 facet 角", "備註"]
+                raw["主要角度"] = raw["主要角度"].map(lambda v: f"{v:.2f}°")
+                raw["局部 facet 角"] = raw["局部 facet 角"].map(
+                    lambda v: "—" if pd.isna(v) else f"{float(v):.1f}°"
+                )
+                raw["備註"] = raw["備註"].fillna("").replace("", "—")
+                render_html_table(raw.style.hide(axis="index"))
 
         if lab_angle_rows:
             st.markdown("---")
