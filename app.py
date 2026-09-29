@@ -5,9 +5,9 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from config import LITERATURE_DB_PATH
+from config import LITERATURE_DB_PATH, SIDEWALL_CASES_PATH, SEM_MEASUREMENTS_PATH
 from ai_assistant import analyze_question_support, detect_question_type, evidence_dataframe, generate_ai_answer, search_literature
-from db_loader import DBValidationError, load_literature_db
+from db_loader import DBValidationError, load_literature_db, load_sidewall_angle_cases, load_sem_measurements
 from literature import build_presets_from_db, closest_literature_case, exact_literature_match
 from plotter import draw_profile
 from predictor import (
@@ -93,9 +93,14 @@ st.markdown(
 # -----------------------------
 try:
     LITERATURE_DB = load_literature_db(LITERATURE_DB_PATH)
+    LAB_SIDEWALL_DB = load_sidewall_angle_cases(SIDEWALL_CASES_PATH)
+    SEM_MEASUREMENTS = load_sem_measurements(SEM_MEASUREMENTS_PATH)
 except (DBValidationError, FileNotFoundError) as exc:
     st.error(f"我整理的文獻資料載入失敗：{exc}")
     st.stop()
+
+# Sidewall angle may use the five lab A–E cases; rate/selectivity remain literature-only.
+ANGLE_DB = LITERATURE_DB + LAB_SIDEWALL_DB
 
 PRESETS = build_presets_from_db(LITERATURE_DB)
 PRESET_LABELS = list(PRESETS.keys())
@@ -234,7 +239,7 @@ exact_case = exact_literature_match(
 
 selectivity = calc_selectivity(LITERATURE_DB, exact_case, BCl3, Cl2, Ar, N2)
 angle, base_angle, angle_low, angle_high = calc_sidewall_angle(
-    LITERATURE_DB, exact_case, BCl3, Cl2, Ar, N2,
+    ANGLE_DB, exact_case, BCl3, Cl2, Ar, N2,
     pressure=pressure, bias_power=bias_power, icp_power=icp_power,
     selectivity=selectivity, is_manual_selectivity=False,
 )
@@ -479,6 +484,37 @@ with literature_tab:
     st.caption(
         "氣體欄位依序是 BCl₃ / Cl₂ / Ar / N₂。因為這些資料來自不同研究，使用的機台、樣品和製程條件並不完全一致，所以我把它們當成參考資料看趨勢，不會把它們當成同一套 DOE 的實驗結果。"
     )
+    st.markdown("#### 實驗室 TiN CPW｜學姊 A–E 製程資料")
+    st.write(
+        "這一區是專題使用的實驗室資料，和上面的公開文獻資料分開呈現。"
+        "A–E 對應五組 Cl₂/Ar/N₂ 條件；側壁角度採原研究整理方式，"
+        "分別取 Center 與 Edge 四個側壁量測中的最大值。"
+    )
+    lab_recipe_df = pd.DataFrame(LAB_SIDEWALL_DB)
+    sem_df = pd.DataFrame(SEM_MEASUREMENTS)
+    lab_summary = (
+        sem_df.groupby(["case", "region"], sort=False)["angle_deg"]
+        .agg(["min", "mean", "max", "std"])
+        .reset_index()
+    )
+    center_max = lab_summary[lab_summary["region"] == "Center"].set_index("case")["max"]
+    edge_max = lab_summary[lab_summary["region"] == "Edge"].set_index("case")["max"]
+    lab_display = pd.DataFrame({
+        "Case": lab_recipe_df["case"],
+        "Cl₂ / Ar / N₂": [f"{r.Cl2:g} / {r.Ar:g} / {r.N2:g}" for r in lab_recipe_df.itertuples()],
+        "壓力（mTorr）": lab_recipe_df["pressure"],
+        "TCP / Source（W）": lab_recipe_df["source_power"],
+        "Bias（W）": lab_recipe_df["bias"],
+        "蝕刻時間（s）": lab_recipe_df["etch_time_s"],
+        "Center c-max（°）": [center_max.get(case) for case in lab_recipe_df["case"]],
+        "Edge e-max（°）": [edge_max.get(case) for case in lab_recipe_df["case"]],
+    })
+    st.dataframe(lab_display, use_container_width=True, hide_index=True)
+    st.caption(
+        "這 5 組是實驗室 A–E 實測條件，不是文獻 P001–P019。"
+        "完整 40 筆 SEM 四側壁角度與 Center/Edge 統計放在「目前模型差多少」頁面。"
+    )
+
     st.markdown("#### 這些資料怎麼進到工具裡")
     with st.expander("看資料怎麼一路算到結果"):
         st.markdown(
@@ -503,7 +539,7 @@ with literature_tab:
 with validation_tab:
     st.subheader("目前模型差多少")
     st.write("我用留一法交叉驗證（LOOCV）做一個簡單的自我檢查：每次先拿掉一筆文獻，再用剩下的資料去估它，看看結果會差多少。現在資料量還不大，所以這頁主要是讓我知道哪些輸出還不能太相信，不是拿來證明模型已經可以做正式製程預測。")
-    render_validation_section(LITERATURE_DB)
+    render_validation_section(LITERATURE_DB, LAB_SIDEWALL_DB, SEM_MEASUREMENTS)
 
 with about_tab:
     st.subheader("這個工具怎麼開始的")
