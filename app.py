@@ -5,8 +5,8 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from config import LITERATURE_DB_PATH
-from db_loader import DBValidationError, load_literature_db
+from config import LITERATURE_DB_PATH, SIDEWALL_CASES_PATH, SEM_MEASUREMENTS_PATH
+from db_loader import DBValidationError, load_literature_db, load_sidewall_angle_cases, load_sem_measurements
 from literature import build_presets_from_db, closest_literature_case, exact_literature_match
 from plotter import draw_profile
 from predictor import (
@@ -85,9 +85,15 @@ st.markdown(
 # -----------------------------
 try:
     LITERATURE_DB = load_literature_db(LITERATURE_DB_PATH)
+    LAB_SIDEWALL_DB = load_sidewall_angle_cases(SIDEWALL_CASES_PATH)
+    SEM_MEASUREMENTS = load_sem_measurements(SEM_MEASUREMENTS_PATH)
 except (DBValidationError, FileNotFoundError) as exc:
     st.error(f"我整理的文獻資料載入失敗：{exc}")
     st.stop()
+
+# Sidewall angle interpolation can use the five lab-measured A–E cases.
+# Rate/selectivity/presets still use only the fully validated literature database.
+ANGLE_DB = LITERATURE_DB + LAB_SIDEWALL_DB
 
 PRESETS = build_presets_from_db(LITERATURE_DB)
 PRESET_LABELS = list(PRESETS.keys())
@@ -226,7 +232,7 @@ exact_case = exact_literature_match(
 
 selectivity = calc_selectivity(LITERATURE_DB, exact_case, BCl3, Cl2, Ar, N2)
 angle, base_angle, angle_low, angle_high = calc_sidewall_angle(
-    LITERATURE_DB, exact_case, BCl3, Cl2, Ar, N2,
+    ANGLE_DB, exact_case, BCl3, Cl2, Ar, N2,
     pressure=pressure, bias_power=bias_power, icp_power=icp_power,
     selectivity=selectivity, is_manual_selectivity=False,
 )
@@ -367,7 +373,7 @@ with literature_tab:
 with validation_tab:
     st.subheader("目前模型差多少")
     st.write("我用留一法交叉驗證（LOOCV）做一個簡單的自我檢查：每次先拿掉一筆文獻，再用剩下的資料去估它，看看結果會差多少。現在資料量還不大，所以這頁主要是讓我知道哪些輸出還不能太相信，不是拿來證明模型已經可以做正式製程預測。")
-    render_validation_section(LITERATURE_DB)
+    render_validation_section(LITERATURE_DB, LAB_SIDEWALL_DB, SEM_MEASUREMENTS)
 
 with about_tab:
     st.subheader("這個工具怎麼開始的")
