@@ -7,6 +7,7 @@
 目前的功能包含：
 
 - 文獻條件整理與比對
+- Microsoft Foundry 文獻研究助理（需在部署環境設定 Secrets）
 - 鄰近條件插值
 - TiN 蝕刻速率、側壁角度、選擇比估算
 - 簡化側壁截面圖
@@ -35,6 +36,13 @@
 pip install -r requirements.txt
 streamlit run app.py
 ```
+
+## Microsoft Foundry 設定
+
+研究助理使用 Microsoft Foundry 的 OpenAI 相容模型端點。請參考
+`.streamlit/secrets.example.toml`，將實際的 `endpoint`、`deployment` 與
+`api_key` 放在本機未追蹤的 `.streamlit/secrets.toml`，或放進 Streamlit
+Community Cloud 的 App settings → Secrets。請勿將真實金鑰提交到 GitHub。
 
 ## 公開展示
 

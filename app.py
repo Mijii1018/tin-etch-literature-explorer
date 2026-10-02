@@ -3,10 +3,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 from config import LITERATURE_DB_PATH, SIDEWALL_CASES_PATH, SEM_MEASUREMENTS_PATH
 from db_loader import DBValidationError, load_literature_db, load_sidewall_angle_cases, load_sem_measurements
+from foundry_agent import FoundryError, FoundrySettings, ask_foundry, classify_question, select_evidence
 from literature import build_presets_from_db, closest_literature_case, exact_literature_match
 from plotter import draw_profile
 from predictor import (
@@ -29,7 +29,7 @@ st.set_page_config(
 
 
 # 鎖定淺色主題，避免 Dark Reader / 瀏覽器強制深色模式造成白底白字。
-components.html(
+st.html(
     """<script>
     try {
       const d = window.parent.document;
@@ -39,7 +39,8 @@ components.html(
       d.documentElement.lang = 'zh-Hant';
       d.documentElement.style.colorScheme = 'light';
     } catch(e) {}
-    </script>""", height=0, width=0
+    </script>""",
+    unsafe_allow_javascript=True,
 )
 
 st.markdown(
@@ -101,6 +102,11 @@ PRESET_META = {PRESET_LABELS[0]: None}
 for label, item in zip(PRESET_LABELS[1:], LITERATURE_DB):
     PRESET_META[label] = item
 
+try:
+    FOUNDRY_SETTINGS = FoundrySettings.from_mapping(st.secrets.get("foundry", {}))
+except FileNotFoundError:
+    FOUNDRY_SETTINGS = FoundrySettings()
+
 DEFAULTS = {
     "BCl3": 0,
     "Cl2": 40,
@@ -118,6 +124,7 @@ DEFAULTS = {
 }
 for key, value in DEFAULTS.items():
     st.session_state.setdefault(key, value)
+st.session_state.setdefault("research_messages", [])
 
 
 def load_preset(label: str):
@@ -187,7 +194,7 @@ with st.sidebar:
     )
     source_reference_card(PRESET_META.get(preset_label))
 
-    if st.button("套用這組條件", use_container_width=True):
+    if st.button("套用這組條件", width="stretch"):
         load_preset(preset_label)
         st.rerun()
 
@@ -257,8 +264,8 @@ closest_case, closest_dist = closest_literature_case(LITERATURE_DB, BCl3, Cl2, A
 # -----------------------------
 # Tabs
 # -----------------------------
-overview_tab, literature_tab, validation_tab, about_tab = st.tabs(
-    ["操作與結果", "文獻資料", "目前模型差多少", "這個工具怎麼開始的"]
+overview_tab, assistant_tab, literature_tab, validation_tab, about_tab = st.tabs(
+    ["操作與結果", "Microsoft 研究助理", "文獻資料", "目前模型差多少", "這個工具怎麼開始的"]
 )
 
 with overview_tab:
@@ -293,7 +300,7 @@ with overview_tab:
             angle_low=angle_low,
             angle_high=angle_high,
         )
-        st.pyplot(fig, use_container_width=True)
+        st.pyplot(fig, width="stretch")
         plt.close(fig)
         st.caption("這是依目前計算結果畫出的簡化截面，只用來比較不同條件下的幾何變化，不是 SEM 實拍。")
 
@@ -327,10 +334,73 @@ with overview_tab:
         st.write(f"估算 TiN 蝕刻深度：**{etched_depth_nm:.1f} nm**")
         st.write(f"估算光阻損耗：**{pr_loss_nm:.1f} nm**")
 
+with assistant_tab:
+    st.subheader("Microsoft Foundry 文獻研究助理")
+    st.write(
+        "研究助理會先從目前整理的 TiN 文獻資料中選出相關案例，再把結構化證據交給 "
+        "Microsoft Foundry 模型整理。回答必須標示文獻編號，資料不足時也要清楚說明。"
+    )
+
+    if not FOUNDRY_SETTINGS.configured:
+        st.info(
+            "研究助理介面已完成，但尚未設定 Microsoft Foundry。請在 Streamlit Cloud 的 "
+            "App settings → Secrets 填入 endpoint、deployment 與 api_key。"
+        )
+        st.code(
+            '[foundry]\nendpoint = "https://YOUR-RESOURCE-NAME.openai.azure.com"\n'
+            'deployment = "YOUR-MODEL-DEPLOYMENT-NAME"\napi_key = "YOUR-FOUNDRY-API-KEY"',
+            language="toml",
+        )
+
+    for message in st.session_state.research_messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    research_prompt = st.chat_input(
+        "例如：Cl₂ 增加對 TiN 蝕刻速率有什麼影響？",
+        key="foundry_research_prompt",
+        disabled=not FOUNDRY_SETTINGS.configured,
+        submit_mode="disable",
+    )
+    if research_prompt:
+        st.session_state.research_messages.append({"role": "user", "content": research_prompt})
+        with st.chat_message("user"):
+            st.markdown(research_prompt)
+
+        evidence = select_evidence(LITERATURE_DB, research_prompt)
+        process_context = {
+            "BCl3_sccm": BCl3,
+            "Cl2_sccm": Cl2,
+            "Ar_sccm": Ar,
+            "N2_sccm": N2,
+            "pressure_mTorr": pressure,
+            "bias": bias_power,
+            "source_power_W": icp_power,
+        }
+
+        with st.chat_message("assistant"):
+            with st.status(":shimmer[正在整理文獻證據]", type="compact") as status:
+                st.write(f"問題類型：{classify_question(research_prompt)}")
+                st.dataframe(pd.DataFrame(evidence).drop(columns=["note"]), hide_index=True)
+                status.update(label=f"已篩選 {len(evidence)} 筆文獻證據", state="complete")
+            try:
+                answer = ask_foundry(
+                    FOUNDRY_SETTINGS,
+                    research_prompt,
+                    evidence,
+                    process_context,
+                    history=st.session_state.research_messages[:-1],
+                )
+            except FoundryError as exc:
+                st.error(str(exc))
+            else:
+                st.markdown(answer)
+                st.session_state.research_messages.append({"role": "assistant", "content": answer})
+
 with literature_tab:
     st.subheader("參考文獻對照")
     st.write("P001～P019 是我整理資料時使用的內部編號。這裡把編號、簡稱和正式論文名稱放在一起，方便回頭確認每一筆資料的來源。")
-    st.dataframe(pd.DataFrame(reference_rows()), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(reference_rows()), hide_index=True)
 
     st.markdown("#### 我整理進資料庫的製程資料")
     db = pd.DataFrame(LITERATURE_DB)
@@ -345,7 +415,7 @@ with literature_tab:
         "蝕刻速率（nm/min）": db["etch_rate_nm_min"],
         "選擇比": db["selectivity"],
     })
-    st.dataframe(compact, use_container_width=True, hide_index=True)
+    st.dataframe(compact, hide_index=True)
     st.caption(
         "氣體欄位依序是 BCl₃ / Cl₂ / Ar / N₂。因為這些資料來自不同研究，使用的機台、樣品和製程條件並不完全一致，所以我把它們當成參考資料看趨勢，不會把它們當成同一套 DOE 的實驗結果。"
     )
@@ -382,7 +452,7 @@ with literature_tab:
         "Center c-max（°）": [center_max.get(case) for case in lab_recipe_df["case"]],
         "Edge e-max（°）": [edge_max.get(case) for case in lab_recipe_df["case"]],
     })
-    st.dataframe(lab_display, use_container_width=True, hide_index=True)
+    st.dataframe(lab_display, hide_index=True)
     st.caption(
         "這 5 組是實驗室 A–E 實測條件，不是文獻 P001–P019。"
         "完整 40 筆 SEM 四側壁角度與 Center/Edge 統計放在「目前模型差多少」頁面。"
